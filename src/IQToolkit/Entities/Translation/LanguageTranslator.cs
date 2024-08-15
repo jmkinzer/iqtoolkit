@@ -57,7 +57,7 @@ namespace IQToolkit.Entities.Translation
         /// <summary>
         /// Gets an expression that selects an entity's generated ID.
         /// </summary>
-        public abstract Expression GetGeneratedIdExpression(MappedColumnMember member);
+        public abstract Expression GetGeneratedIdExpression(ColumnMember member);
 
         /// <summary>
         /// Gets an expression that evaluates to the number of rows affected by the last command.

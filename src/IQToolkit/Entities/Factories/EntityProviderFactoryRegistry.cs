@@ -2,6 +2,7 @@
 // This source code is made available under the terms of the Microsoft Public License (MS-PL)
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection;
@@ -23,13 +24,60 @@ namespace IQToolkit.Entities.Factories
 
         private readonly Lazy<bool> _factoriesRegistered;
 
+        /// <summary>
+        /// The <see cref="Assembly"/> used to search for provider factories.
+        /// </summary>
+        public IReadOnlyList<Assembly> SearchAssemblies =>
+            _searchAssemblies.Value;
+
+        private readonly Lazy<IReadOnlyList<Assembly>> _searchAssemblies;
+
         private EntityProviderFactoryRegistry()
         {
-            _factoriesRegistered = new Lazy<bool>(() =>
-            {
-                RegisterFactories();
-                return true;
-            });
+            _searchAssemblies = 
+                new Lazy<IReadOnlyList<Assembly>>(
+                () =>
+                {
+                    var thisAssemblyName =
+                        Assembly.GetExecutingAssembly().FullName;
+
+                    // find all currently loaded assemblies that immediately reference this assembly
+                    var toolkitReferencingAssemblies =
+                        AppDomain.CurrentDomain.GetAssemblies()
+                            .Where(a => ReferencesAssembly(a, thisAssemblyName))
+                            .ToList();
+
+                    // broaden to include directly referenced assemblies.
+                    var broadenedAssemblyNames = toolkitReferencingAssemblies
+                        .SelectMany(a => a.GetReferencedAssemblies())
+                        .Distinct()
+                        .ToList();
+
+                    // force load broadened assemblies
+                    foreach (var assembly in broadenedAssemblyNames)
+                    {
+                        AppDomain.CurrentDomain.Load(assembly);
+                    }
+
+                    return AppDomain.CurrentDomain.GetAssemblies();
+                });
+
+            _factoriesRegistered = 
+                new Lazy<bool>(() =>
+                {
+                    // find all entity provider factory types and register them
+                    var factoryTypes = SearchAssemblies
+                        .SelectMany(a => a.GetTypes())
+                        .Where(t => typeof(EntityProviderFactory).IsAssignableFrom(t))
+                        .ToList();
+
+                    foreach (var factoryType in factoryTypes)
+                    {
+                        Register(factoryType);
+                    }
+
+                    return true;
+                });
         }
 
         public static readonly EntityProviderFactoryRegistry Singleton =
@@ -37,37 +85,6 @@ namespace IQToolkit.Entities.Factories
 
         private void RegisterFactories()
         {
-            var thisAssemblyName =
-                Assembly.GetExecutingAssembly().FullName;
-
-            // find all currently loaded assemblies that immediately reference this assembly
-            var toolkitReferencingAssemblies =
-                AppDomain.CurrentDomain.GetAssemblies()
-                    .Where(a => ReferencesAssembly(a, thisAssemblyName))
-                    .ToList();
-
-            // broaden to include directly referenced assemblies.
-            var broadenedAssemblyNames = toolkitReferencingAssemblies
-                .SelectMany(a => a.GetReferencedAssemblies())
-                .Distinct()
-                .ToList();
-
-            // force load broadened assemblies
-            foreach (var assembly in broadenedAssemblyNames)
-            {
-                AppDomain.CurrentDomain.Load(assembly);
-            }
-
-            // find all entity provider factory types and register them
-            var factoryTypes = AppDomain.CurrentDomain.GetAssemblies()
-                .SelectMany(a => a.GetTypes())
-                .Where(t => typeof(EntityProviderFactory).IsAssignableFrom(t))
-                .ToList();
-
-            foreach (var factoryType in factoryTypes)
-            {
-                Register(factoryType);
-            }
         }
 
         private static bool ReferencesAssembly(Assembly assembly, string assemblyName)

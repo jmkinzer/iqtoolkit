@@ -13,11 +13,5 @@ namespace IQToolkit.Entities.Mapping
         /// If not specified, the table's name will be the name of the member or type the attribute is placed on.
         /// </summary>
         public string? Name { get; set; }
-
-        /// <summary>
-        /// The ID to use for this table in advanced multi-table mapping.
-        /// If not specified, the <see cref="Id"/> will be the table's name.
-        /// </summary>
-        public string? Id { get; set; }
     }
 }

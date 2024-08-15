@@ -30,15 +30,13 @@ namespace IQToolkit.Entities
         public abstract MappedEntity GetEntity(MemberInfo contextMember);
 
         /// <summary>
-        /// Gets the <see cref="MappedEntity"/> given the table.
-        /// </summary>
-        public virtual MappedEntity GetEntity(IEntityTable table) =>
-            this.GetEntity(table.EntityType, table.EntityId);
-
-        /// <summary>
-        /// Get the <see cref="MappedEntity"/> the entity, 
-        /// yet is represented publicly as 'elementType'.
+        /// Get the <see cref="MappedEntity"/> the entity for the entity type and id.
         /// </summary>
         public abstract MappedEntity GetEntity(Type entityType, string? entityId = null);
+
+        /// <summary>
+        /// Gets all the known mapped entities.
+        /// </summary>
+        public abstract IReadOnlyList<MappedEntity> GetEntities();
     }
 }

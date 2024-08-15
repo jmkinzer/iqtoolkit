@@ -8,6 +8,11 @@ using System.Reflection;
 
 namespace IQToolkit.Entities.Mapping
 {
+    using Utils;
+
+    /// <summary>
+    /// A base class for a member of an entity type that is mapped to one or more database columns.
+    /// </summary>
     public abstract class MappedMember
     {
         /// <summary>
@@ -16,57 +21,52 @@ namespace IQToolkit.Entities.Mapping
         public abstract MappedEntity Entity { get; }
 
         /// <summary>
+        /// The parent of this member if it is nested within another member.
+        /// </summary>
+        public abstract MappedMember? Parent { get; }
+
+        /// <summary>
         /// The member that is mapped.
         /// </summary>
         public abstract MemberInfo Member { get; }
+
+        /// <summary>
+        /// The type of the member.
+        /// </summary>
+        public virtual Type Type => TypeHelper.GetMemberType(this.Member);
     }
 
-    public abstract class MappedColumnMember : MappedMember
+    /// <summary>
+    /// A member that is mapped to a single column.
+    /// </summary>
+    public abstract class ColumnMember : MappedMember
     {
         /// <summary>
-        /// The table containing this column.
+        /// The column that is mapped.
         /// </summary>
-        public abstract MappedTable Table { get; }
-
-        /// <summary>
-        /// The name of the column in the table.
-        /// </summary>
-        public abstract string ColumnName { get; }
-
-        /// <summary>
-        /// The column's type in the database query language.
-        /// </summary>
-        public abstract string? ColumnType { get; }
-
-        /// <summary>
-        /// True if the member is part of the entity's primary key.
-        /// </summary>
-        public abstract bool IsPrimaryKey { get; }
-
-        /// <summary>
-        /// True if a property should not be updated.
-        /// </summary>
-        public abstract bool IsReadOnly { get; }
-
-        /// <summary>
-        /// True if a property is computed after insert or update.
-        /// </summary>
-        public abstract bool IsComputed { get; }
-
-        /// <summary>
-        /// True if a property value is generated on the server during insertion.
-        /// </summary>
-        public abstract bool IsGenerated { get; }
-
-        /// <summary>
-        /// True if a property can be part of an update operation
-        /// </summary>
-        public virtual bool IsUpdatable =>
-            !this.IsPrimaryKey
-            && !this.IsReadOnly;
+        public abstract MappedColumn Column { get; }
     }
 
-    public abstract class MappedRelationshipMember : MappedMember
+    /// <summary>
+    /// A member that is constructed from and composed of multiple mapped members.
+    /// </summary>
+    public abstract class CompoundMember : MappedMember
+    {
+        /// <summary>
+        /// The constructed type of the compound member, if it differs from the member type.
+        /// </summary>
+        public abstract Type ConstructedType { get; }
+
+        /// <summary>
+        /// The mapped members for the type.
+        /// </summary>
+        public abstract IReadOnlyList<MappedMember> Members { get; }
+    }
+
+    /// <summary>
+    /// The base class for any member that refers to another entity or a collection of entities.
+    /// </summary>
+    public abstract class RelationshipMember : MappedMember
     {
         /// <summary>
         /// The entity on the other side of the relationship.
@@ -84,25 +84,24 @@ namespace IQToolkit.Entities.Mapping
         public abstract bool IsTarget { get; }
 
         /// <summary>
-        /// Determines if a relationship property refers to a single entity (as opposed to a collection.)
+        /// Determines if a relationship property is a one-to-one relationship.
         /// </summary>
-        public abstract bool IsSingleton { get; }
+        public abstract bool IsOneToOne { get; }
     }
 
-    public abstract class MappedAssociationMember : MappedRelationshipMember
+    /// <summary>
+    /// A <see cref="RelationshipMember"/> that is a join of two database tables.
+    /// </summary>
+    public abstract class AssociationMember : RelationshipMember
     {
         /// <summary>
-        /// Returns the key members on this side of the association
+        /// Returns the columns on this side of the association
         /// </summary>
-        public abstract IReadOnlyList<MappedColumnMember> KeyMembers { get; }
+        public abstract IReadOnlyList<MappedColumn> KeyColumns { get; }
 
         /// <summary>
-        /// Returns the key members on the other side (related side) of the association
+        /// Returns the key columns on the other side (related side) of the association
         /// </summary>
-        public abstract IReadOnlyList<MappedColumnMember> RelatedKeyMembers { get; }
-    }
-
-    public abstract class MappedNestedEntityMember : MappedRelationshipMember
-    {
+        public abstract IReadOnlyList<MappedColumn> RelatedKeyColumns { get; }
     }
 }

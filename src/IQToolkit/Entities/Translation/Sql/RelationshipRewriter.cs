@@ -11,6 +11,7 @@ namespace IQToolkit.Entities.Translation
     using Expressions.Sql;
     using Entities.Mapping;
     using Utils;
+    using System.Diagnostics.CodeAnalysis;
 
     /// <summary>
     /// Translates accesses to relationship members into projections or joins
@@ -112,14 +113,15 @@ namespace IQToolkit.Entities.Translation
         {
             var source = this.Visit(memberAccess.Expression);
 
-            if (FindEntityExpression(memberAccess.Expression) is { } entity 
-                && entity.Entity.RelationshipMembers.TryGetMemberByName(memberAccess.Member.Name, out var rm))
+            if (TryGetEntityExpression(source, out var entity)
+                && entity.Entity.TryGetMember(memberAccess.Member.Name, out var entityMember)
+                && entityMember is RelationshipMember rm)
             {
                 var projection = (ClientProjectionExpression)this.Visit(
                     _mapper.GetMemberExpression(source, rm, _linguist, _police)
                     );
 
-                if (_currentFrom != null && rm.IsSingleton)
+                if (_currentFrom != null && rm.IsOneToOne)
                 {
                     // convert singleton associations directly to OUTER APPLY
                     // by adding join to relavent FROM clause
@@ -149,13 +151,16 @@ namespace IQToolkit.Entities.Translation
             }
         }
 
-        private static EntityExpression? FindEntityExpression(Expression exp)
+        private static bool TryGetEntityExpression(
+            Expression exp, 
+            [NotNullWhen(true)] out EntityExpression? entityExpression)
         {
             // see through the outer-joined-expression to find the entity expression
             if (exp is OuterJoinedExpression oj)
                 exp = oj.Expression;
 
-            return exp as EntityExpression;
+            entityExpression = exp as EntityExpression;
+            return entityExpression != null;
         }
     }
 }

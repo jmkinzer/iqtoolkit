@@ -77,7 +77,7 @@ namespace IQToolkit.Utils
             if (fn == null)
                 throw new ArgumentNullException(nameof(fn));
 
-            var invoke = delegateType.FindDeclaredMethod("Invoke");
+            delegateType.TryGetDeclaredMethod("Invoke", out var invoke);
             var parameters = invoke!.GetParameters();
             var typeArgs = new Type[1 + parameters.Length];
 

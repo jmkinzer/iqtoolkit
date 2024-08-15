@@ -13,26 +13,22 @@ namespace IQToolkit.Entities.Mapping
     public class AssociationAttribute : MemberAttribute
     {
         /// <summary>
-        /// The members of the entity that are used to associate this entity with the other related entities.
-        /// This property must be specified.
+        /// One or more columns used to associate this entity with the other related entities.
         /// </summary>
-        public string? KeyMembers { get; set; }
+        public string? KeyColumns { get; set; }
 
         /// <summary>
         /// The mapping ID of the related entity.
-        /// If not specified, it is inferred to be the entity id of the related entity type.
         /// </summary>
         public string? RelatedEntityId { get; set; }
 
         /// <summary>
-        /// The members in the related entity type that form the association key.
-        /// If not specified, the related key members are inferred to have the same names as the key members. 
+        /// One or more columns from the tables associated with the related entity.
         /// </summary>
-        public string? RelatedKeyMembers { get; set; }
+        public string? RelatedKeyColumns { get; set; }
 
         /// <summary>
-        /// True if the association's <see cref="KeyMembers"/> correpsonding columns are foreign keys (constrained to the related table's primary key).
-        /// This information is important to correctly order inserts, updates and deletes without violating foreign key constraints in the database.
+        /// True if the <see cref="KeyColumns"/> are a foreign key referring to the related entity's table primary key.
         /// </summary>
         public bool IsForeignKey { get; set; }
     }

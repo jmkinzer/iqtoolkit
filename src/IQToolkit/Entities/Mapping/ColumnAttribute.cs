@@ -18,10 +18,10 @@ namespace IQToolkit.Entities.Mapping
         public string? Name { get; set; }
 
         /// <summary>
-        /// The ID of the table the column belongs to in advanced multi-table mapping.
-        /// If not specified, the table ID will be the primary table's ID.
+        /// The name of the table the column belongs to in advanced multi-table mapping.
+        /// If not specified, the table name is assumed to be the primary table name.
         /// </summary>
-        public string? TableId { get; set; }
+        public string? Table { get; set; }
 
         /// <summary>
         /// The type of the column as describe in the database language.

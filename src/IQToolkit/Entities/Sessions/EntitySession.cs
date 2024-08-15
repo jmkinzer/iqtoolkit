@@ -101,12 +101,12 @@ namespace IQToolkit.Entities.Sessions
             {
                 this.Session = session;
                 this.Entity = entity;
-                this.Table = this.Session.Provider.GetTable<TEntity>(entity.EntityId);
+                this.Table = this.Session.Provider.GetTable<TEntity>(entity.Id);
             }
 
             public new IEntityProvider Provider => this.Session.Provider;
             public Type EntityType => typeof(TEntity);
-            public string EntityId => this.Entity.EntityId;
+            public string EntityId => this.Entity.Id;
             public TEntity? GetById(object id) => this.Table.GetById(id);
             object? IEntityTable.GetById(object id) => this.GetById(id);
 
@@ -384,7 +384,7 @@ namespace IQToolkit.Entities.Sessions
 
                     case SubmitAction.ConditionalUpdate:
                         if (item.Original != null &&
-                            IsModified(item.Entity, item.Instance, item.Original))
+                            IsModified(item.Entity.Members, item.Instance, item.Original))
                         {
                             this.Table.Update(item.Instance);
                             return true;
@@ -428,8 +428,8 @@ namespace IQToolkit.Entities.Sessions
                 if (_generatedKeys == null)
                 {
                     _generatedKeys = this.Entity.PrimaryKeyMembers
-                        .Where(k => k.IsGenerated)
-                        .Select(k => k.Member)
+                        .Where(m => m.Column.IsGenerated)
+                        .Select(m => m.Member)
                         .ToArray();
                 }
  
@@ -520,7 +520,7 @@ namespace IQToolkit.Entities.Sessions
                     if (ti.State == SubmitAction.ConditionalUpdate)
                     {
                         if (ti.Original != null 
-                            && IsModified(ti.Entity, ti.Instance, ti.Original))
+                            && IsModified(ti.Entity.Members, ti.Instance, ti.Original))
                         {
                             return SubmitAction.Update;
                         }
@@ -612,7 +612,7 @@ namespace IQToolkit.Entities.Sessions
                         }
                         else
                         {
-                            var original = CloneEntity(this.Entity, instance);
+                            var original = CloneEntity(this.Entity.ConstructedType, this.Entity.Members, instance);
                             _tracked[instance] = new TrackedItem(this, instance, original, SubmitAction.ConditionalUpdate, false);
                         }
                         break;
@@ -627,7 +627,7 @@ namespace IQToolkit.Entities.Sessions
                 TrackedItem ti;
                 if (_tracked.TryGetValue((TEntity)sender, out ti) && ti.State == SubmitAction.ConditionalUpdate)
                 {
-                    object clone = CloneEntity(this.Entity, ti.Instance);
+                    object clone = CloneEntity(this.Entity.ConstructedType, this.Entity.Members, ti.Instance);
                     _tracked[(TEntity)sender] = new TrackedItem(this, ti.Instance, clone, SubmitAction.Update, true);
                 }
             }
@@ -771,7 +771,7 @@ namespace IQToolkit.Entities.Sessions
         {
             var mapping = _provider.Mapping;
 
-            foreach (var rm in entity.RelationshipMembers)
+            foreach (var rm in entity.Members.OfType<AssociationMember>())
             {
                 if (rm.IsSource)
                 {
@@ -804,7 +804,7 @@ namespace IQToolkit.Entities.Sessions
         {
             var mapping = _provider.Mapping;
 
-            foreach (var rm in entity.RelationshipMembers)
+            foreach (var rm in entity.Members.OfType<AssociationMember>())
             {
                 if (rm.IsTarget)
                 {
@@ -866,13 +866,16 @@ namespace IQToolkit.Entities.Sessions
             return firstKey;
         }
 
-        private static object CloneEntity(MappedEntity entity, object instance)
+        private static object CloneEntity(
+            Type constructedType, 
+            IReadOnlyList<MappedMember> members, 
+            object instance)
         {
-            var clone = System.Runtime.Serialization.FormatterServices.GetSafeUninitializedObject(entity.ConstructedType);
+            var clone = System.Runtime.Serialization.FormatterServices.GetSafeUninitializedObject(constructedType);
 
-            foreach (var mm in entity.MappedMembers)
+            foreach (var mm in members)
             {
-                if (mm is MappedColumnMember cm)
+                if (mm is ColumnMember cm)
                 {
                     TypeHelper.SetFieldOrPropertyValue(
                         cm.Member,
@@ -880,13 +883,13 @@ namespace IQToolkit.Entities.Sessions
                         TypeHelper.GetFieldOrPropertyValue(cm.Member, instance)
                         );
                 }
-                else if (mm is MappedNestedEntityMember nm)
+                else if (mm is CompoundMember mcm)
                 {
-                    var nestedValue = TypeHelper.GetFieldOrPropertyValue(nm.Member, instance);
-                    if (nestedValue != null)
+                    var value = TypeHelper.GetFieldOrPropertyValue(mcm.Member, instance);
+                    if (value != null)
                     {
-                        var nestedClone = CloneEntity(nm.RelatedEntity, nestedValue);
-                        TypeHelper.SetFieldOrPropertyValue(nm.Member, nestedClone, clone);
+                        var nestedClone = CloneEntity(mcm.ConstructedType, mcm.Members, value);
+                        TypeHelper.SetFieldOrPropertyValue(mcm.Member, nestedClone, clone);
                     }
                 }
             }
@@ -894,11 +897,11 @@ namespace IQToolkit.Entities.Sessions
             return clone;
         }
 
-        private static bool IsModified(MappedEntity entity, object instance, object original)
+        private static bool IsModified(IReadOnlyList<MappedMember> members, object instance, object original)
         {
-            foreach (var mm in entity.MappedMembers)
+            foreach (var mm in members)
             {
-                if (mm is MappedColumnMember cm)
+                if (mm is ColumnMember cm)
                 {
                     var current_value = TypeHelper.GetFieldOrPropertyValue(cm.Member, instance);
                     var original_value = TypeHelper.GetFieldOrPropertyValue(cm.Member, original);
@@ -906,11 +909,11 @@ namespace IQToolkit.Entities.Sessions
                     if (!object.Equals(current_value, original_value))
                         return true;
                 }
-                else if (mm is MappedNestedEntityMember nm)
+                else if (mm is CompoundMember mcm)
                 {
-                    var current_value = TypeHelper.GetFieldOrPropertyValue(nm.Member, instance);
-                    var original_value = TypeHelper.GetFieldOrPropertyValue(nm.Member, original);
-                    if (IsModified(nm.RelatedEntity, current_value!, original_value!))
+                    var current_value = TypeHelper.GetFieldOrPropertyValue(mcm.Member, instance);
+                    var original_value = TypeHelper.GetFieldOrPropertyValue(mcm.Member, original);
+                    if (IsModified(mcm.Members, current_value!, original_value!))
                         return true;
                 }
             }

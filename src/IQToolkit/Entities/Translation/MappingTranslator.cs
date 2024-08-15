@@ -8,6 +8,7 @@ using System.Reflection;
 namespace IQToolkit.Entities.Translation
 {
     using Mapping;
+    using System.Diagnostics.CodeAnalysis;
 
     /// <summary>
     /// Applies mapping translations to queries.
@@ -48,13 +49,23 @@ namespace IQToolkit.Entities.Translation
 
         /// <summary>
         /// Get an expression for a mapped property relative to a root expression. 
-        /// The root is either a TableExpression or an expression defining an entity instance.
+        /// The source is either a TableExpression or an expression defining an entity instance.
         /// </summary>
         public abstract Expression GetMemberExpression(
-            Expression root, 
+            Expression source, 
             MappedMember member,
             LanguageTranslator linguist,
             PolicyTranslator police);
+
+        /// <summary>
+        /// Get an expression that refers to a database table column.
+        /// The source is either a TableExpression, Join or Select.
+        /// </summary>
+        public abstract bool TryGetColumnExpression(
+            Expression source,
+            MappedColumn column,
+            LanguageTranslator linguist,
+            [NotNullWhen(true)] out Expression columnExpression);
 
         /// <summary>
         /// Get an expression that represents the insert operation for the specified instance.

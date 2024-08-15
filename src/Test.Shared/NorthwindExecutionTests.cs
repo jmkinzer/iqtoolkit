@@ -3,54 +3,20 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-
 using IQToolkit.Entities;
 using IQToolkit.Entities.Mapping;
 using IQToolkit.Entities.Sessions;
 using IQToolkit;
+
+#nullable disable
 
 namespace Test
 {
 #if !SHAREDLIB  // so this library does not show up as a test library
     [TestClass]
 #endif
-    public partial class NorthwindExecutionTests
+    public partial class NorthwindExecutionTests : TestBase
     {
-        private static object _dbLock = new object();
-        private static IDbConnection? _connection;
-
-        protected void TestProvider(
-            EntityMapping mapping,
-            Action<IEntityProvider> fnTest)
-        {
-            // force serialization of integration tests
-            lock (_dbLock)
-            {
-                if (_connection == null)
-                {
-                    _connection = TestProviders.CreateConnection();
-                    // keep connection open because rapid open-close of connection slows down tests
-                    _connection.Open();
-                }
-
-                var provider = TestProviders.CreateProvider(_connection, mapping);
-                fnTest(provider);
-            }
-        }
-
-        private static readonly EntityMapping _defaultNorthwindMapping =
-            new AttributeMapping(typeof(NorthwindWithAttributes));
-
-        protected void TestNorthwind(
-            Action<Northwind> fnTest,
-            EntityMapping? mapping = null)
-        {
-            TestProvider(
-                mapping ?? _defaultNorthwindMapping,
-                provider => fnTest(new Northwind(provider))
-                );
-        }
-
         #region Query Compiler
 
         [TestMethod]
@@ -293,13 +259,12 @@ namespace Test
             TestNorthwind(db =>
             {
                 var list = db.Customers
-                    .Select(c => (string?)null)
+                    .Select(c => (string)null)
                     .ToList();
 
                 Assert.AreEqual(91, list.Count);
                 Assert.IsTrue(list.All(x => x == null));
             });
-
 
             // constructed value with one column
             TestNorthwind(db =>
@@ -3505,7 +3470,11 @@ namespace Test
                 Assert.AreEqual(6, doubleCusts.Count);
                 Assert.AreEqual(true, doubleCusts.All(c => c.A.CustomerID == "ALFKI" && c.B.CustomerID == "ALFKI"));
             });
+        }
 
+        [TestMethod]
+        public void TestMapping_Assocation_Select_MultiHop()
+        {
             // multi-hop
             TestNorthwind(db =>
             {

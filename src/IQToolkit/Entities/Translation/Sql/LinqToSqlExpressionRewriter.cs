@@ -361,7 +361,8 @@ namespace IQToolkit.Entities.Translation
             MemberExpression mex)
         {
             if (mex.Expression is EntityExpression ex 
-                && ex.Entity.RelationshipMembers.TryGetMemberByName(mex.Member.Name, out var rm))
+                && ex.Entity.TryGetMember(mex.Member.Name, out var entityMember)
+                && entityMember is RelationshipMember rm)
             {
                 return _mapper.GetMemberExpression(mex.Expression, rm, _linguist, _police);
             }
@@ -1088,7 +1089,7 @@ namespace IQToolkit.Entities.Translation
 
         private Expression BindDelete(IEntityTable upd, Expression? instance, LambdaExpression? deleteCheck)
         {
-            MappedEntity entity = _mapper.Mapping.GetEntity(upd);
+            MappedEntity entity = _mapper.Mapping.GetEntity(upd.EntityType, upd.EntityId);
             return this.Visit(_mapper.GetDeleteExpression(entity, instance, deleteCheck, _linguist, _police));
         }
 
@@ -1169,7 +1170,8 @@ namespace IQToolkit.Entities.Translation
                 && !_map.ContainsKey((ParameterExpression)m.Expression)
                 && this.IsQuery(m))
             {
-                return this.RewriteSequence(_mapper.GetQueryExpression(_mapper.Mapping.GetEntity(m.Member), _linguist, _police));
+                var entity = _mapper.Mapping.GetEntity(m.Member);
+                return this.RewriteSequence(_mapper.GetQueryExpression(entity, _linguist, _police));
             }
 
             var source = this.Visit(m.Expression);

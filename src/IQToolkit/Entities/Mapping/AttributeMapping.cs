@@ -18,7 +18,8 @@ namespace IQToolkit.Entities.Mapping
     public class AttributeMapping : StandardMapping
     {
         private ImmutableDictionary<string, IReadOnlyList<MappingAttribute>> _idToAttributes;
-        private ImmutableDictionary<MemberInfo, string> _contextMemberEntityIds;
+        private ImmutableDictionary<MemberInfo, string> _contextMembertoEntityIdMap;
+        private ImmutableDictionary<string, MemberInfo> _entityIdToContextMemberMap;
 
         /// <summary>
         /// Constructs a new instance of a <see cref="AttributeMapping"/> where mapping attributes are
@@ -30,15 +31,13 @@ namespace IQToolkit.Entities.Mapping
             : base(contextType)
         {
             _idToAttributes = ImmutableDictionary<string, IReadOnlyList<MappingAttribute>>.Empty;
-            _contextMemberEntityIds = ImmutableDictionary<MemberInfo, string>.Empty;
+            _contextMembertoEntityIdMap = ImmutableDictionary<MemberInfo, string>.Empty;
+            _entityIdToContextMemberMap = ImmutableDictionary<string, MemberInfo>.Empty;
 
             if (contextType != null)
                 this.InitializeContextMembers();
         }
 
-        /// <summary>
-        /// Gets the entity id for the entity type.
-        /// </summary>
         protected override string GetEntityId(Type entityType)
         {
             if (this.ContextType != null
@@ -58,12 +57,9 @@ namespace IQToolkit.Entities.Mapping
             return entityType.Name;
         }
 
-        /// <summary>
-        /// Gets the entity id for the context member.
-        /// </summary>
         protected override string GetEntityId(MemberInfo contextMember)
         {
-            if (!_contextMemberEntityIds.TryGetValue(contextMember, out var id))
+            if (!_contextMembertoEntityIdMap.TryGetValue(contextMember, out var id))
             {
                 var entityAttr = contextMember.GetCustomAttribute<EntityAttribute>();
 
@@ -71,69 +67,70 @@ namespace IQToolkit.Entities.Mapping
                     ? entityAttr.Id
                     : id = base.GetEntityId(contextMember);
 
-                id = ImmutableInterlocked.GetOrAdd(ref _contextMemberEntityIds, contextMember, tmp);
+                id = ImmutableInterlocked.GetOrAdd(ref _contextMembertoEntityIdMap, contextMember, tmp);
+                _entityIdToContextMemberMap = _entityIdToContextMemberMap.SetItem(id, contextMember);
             }
 
             return id;
         }
 
-        /// <summary>
-        /// Create a <see cref="MappedEntity"/> from attributes on the entity or context type.
-        /// </summary>
         protected override MappedEntity CreateEntity(
-            Type entityType, string entityId, ParentEntity? parent)
+            Type entityType, string entityId)
         {
             return new StandardEntity(
                 this,
                 entityId,
                 entityType,
-                GetEntityRuntimeType(entityType, entityId, parent),
-                me => CreateEntityTables(me, parent),
-                me => CreateMembers(me, parent)
+                GetEntityRuntimeType(entityType, entityId),
+                me => CreateEntityTables(me),
+                me => CreateMembers(me, parent: null)
                 );
         }
 
         protected virtual Type GetEntityRuntimeType(
-            Type entityType, string entityId, ParentEntity? parent)
+            Type entityType, 
+            string entityId)
         {
-            var attr = this.GetMappingAttributes(entityType, entityId, parent)
+            var attr = this.GetOrCreateMappingAttributes(entityType, entityId)
                 .OfType<EntityAttribute>()
                 .FirstOrDefault();
 
-            return attr != null && attr.RuntimeType != null && parent == null
-                ? attr.RuntimeType
+            return attr != null && attr.ConstructedType != null
+                ? attr.ConstructedType
                 : entityType;
         }
 
         protected virtual IReadOnlyList<MappedTable> CreateEntityTables(
-            MappedEntity entity, ParentEntity? parent)
+            MappedEntity entity)
         {
-            var attrs = GetMappingAttributes(entity.Type, entity.EntityId, parent)
+            var attrs = GetOrCreateMappingAttributes(entity.Type, entity.Id)
                 .OfType<TableBaseAttribute>();
 
-            return attrs
-                .Select(ta => GetOrCreateTable(entity, ta.Id ?? entity.EntityId, parent))
-                .ToReadOnly();
+            var tableAttr = attrs.OfType<TableAttribute>().FirstOrDefault();
+            var extTableAttrs = attrs.OfType<ExtensionTableAttribute>();
+
+            var tables = new List<MappedTable>();
+            tables.Add(CreateTable(entity, tableAttr?.Name ?? entity.Id));
+            tables.AddRange(extTableAttrs.Select(ta => CreateTable(entity, ta.Name ?? entity.Id)));
+            return tables.ToReadOnly();
         }
 
         protected virtual IReadOnlyList<MappedMember> CreateMembers(
-            MappedEntity entity, 
-            ParentEntity? parent)
+            MappedEntity entity,
+            MappedMember? parent)
         {
-            var attrs = GetMappingAttributes(entity.Type, entity.EntityId, parent)
-                .OfType<MemberAttribute>()
-                .OrderBy(ma => ma.Member)
-                .ToReadOnly();
+            var declaringType = parent != null
+                ? TypeHelper.GetSequenceElementType(parent.Type)
+                : entity.Type;
 
             var mappedMembers = new List<MappedMember>();
 
+            var attrs = GetOrCreateMappingAttributes(entity.Type, entity.Id).OfType<MemberAttribute>().ToList();
             foreach (var attr in attrs)
             {
-                if (string.IsNullOrEmpty(attr.Member))
-                    continue;
-
-                var memberName = attr.Member;
-                if (entity.Type.FindDeclaredFieldOrPropertyFromPath(memberName) is { } member)
+                if (attr.Member != null 
+                    && entity.Type.TryGetDeclaredFieldOrPropertyFromPath(attr.Member, out var member)
+                    && member.DeclaringType == declaringType)
                 {
                     var mappedMember = CreateMember(entity, member, attr, parent);
                     mappedMembers.Add(mappedMember);
@@ -144,150 +141,100 @@ namespace IQToolkit.Entities.Mapping
         }
 
         protected virtual MappedMember CreateMember(
-            MappedEntity entity, MemberInfo member, MemberAttribute attr, ParentEntity? parent)
+            MappedEntity entity, 
+            MemberInfo member, 
+            MemberAttribute attr,
+            MappedMember? parent)
         {
             switch (attr)
             {
                 case ColumnAttribute columnAttr:
-                    var columnName = !string.IsNullOrEmpty(columnAttr.Name)
-                        ? columnAttr.Name
-                        : member.Name;
-
-                    var columnTable = (!string.IsNullOrEmpty(columnAttr.TableId)
-                            && this.GetOrCreateTable(entity, columnAttr.TableId, parent) is { } tableInAttr)
-                        ? tableInAttr
-                        : entity.PrimaryTable;
-
-                    var columnType = !string.IsNullOrEmpty(columnAttr.DbType)
-                        ? columnAttr.DbType
-                        : null;
-
                     return new StandardColumnMember(
                         entity,
+                        parent,
                         member,
-                        columnTable,
-                        columnName,
-                        columnType,
-                        isPrimaryKey: columnAttr.IsPrimaryKey,
-                        isReadOnly: columnAttr.IsReadOnly,
-                        isComputed: columnAttr.IsComputed,
-                        isGenerated: columnAttr.IsGenerated
-                        );
+                        me =>
+                        {
+                            var table = !string.IsNullOrEmpty(columnAttr.Table)
+                                && entity.TryGetTable(columnAttr.Table, out var colTable)
+                                ? colTable
+                                : entity.PrimaryTable;
+                            var colName = !string.IsNullOrEmpty(columnAttr.Name) 
+                                ? columnAttr.Name 
+                                : member.Name;
+                            table.TryGetColumn(colName, out var column);
+                            return column!;
+                        });
 
+                case CompoundAttribute compoundAttr:
+                    return new StandardCompoundMember(
+                        entity,
+                        parent,
+                        member,
+                        compoundAttr.ConstructedType ?? TypeHelper.GetMemberType(member),
+                        me => CreateMembers(me.Entity, me)
+                        );
                 case AssociationAttribute assocAttr:
                     return new StandardAssociationMember(
                         entity,
+                        parent,
                         member,
                         assocAttr.IsForeignKey,
-                        me => GetAssociationKeyMembers(me, assocAttr),
-                        me => GetAssociationRelatedEntity(me, assocAttr),
-                        me => GetAssociationRelatedKeyMembers(me, assocAttr)
-                        );
-
-                case NestedEntityAttribute nestedAttr:
-                    var nestedEntityId = entity.EntityId + "." + member.Name;
-                    var nestedEntityType = TypeHelper.GetMemberType(member);
-
-                    var nestedEntity = this.GetOrCreateEntity(
-                        nestedEntityType,
-                        nestedEntityId,
-                        new ParentEntity(parent, member, entity.Type, entity.EntityId)
-                        );
-
-                    return new StandardNestedEntityMember(
-                        nestedEntity,
-                        member,
-                        me => entity
-                        );
+                        me => !string.IsNullOrEmpty(assocAttr.KeyColumns) 
+                            ? this.GetEntityColumns(entity, assocAttr.KeyColumns)
+                            : ReadOnlyList<MappedColumn>.Empty,
+                        me =>
+                        {
+                            var relatedEntityType = TypeHelper.GetEntityType(member);
+                            var relatedEntityId = !string.IsNullOrEmpty(assocAttr.RelatedEntityId) ? assocAttr.RelatedEntityId : this.GetEntityId(relatedEntityType);
+                            return this.GetEntity(relatedEntityType, relatedEntityId);
+                        },
+                        me => 
+                        {
+                            if (!string.IsNullOrEmpty(assocAttr.RelatedKeyColumns))
+                                return this.GetEntityColumns(me.RelatedEntity, assocAttr.RelatedKeyColumns);
+                            if (!string.IsNullOrEmpty(assocAttr.KeyColumns))
+                                return this.GetEntityColumns(me.RelatedEntity, assocAttr.KeyColumns);
+                            return ReadOnlyList<MappedColumn>.Empty;
+                        });
 
                 default:
                     throw new InvalidOperationException($"AttributeMapping: The member '{entity.Type.Name}.{member.Name}' has an unknown mapping attribute '{attr.GetType().Name}'");
             }
         }
 
-        private MappedEntity GetAssociationRelatedEntity(MappedRelationshipMember member, AssociationAttribute attr)
-        {
-            var relatedEntityType = TypeHelper.GetSequenceElementType(TypeHelper.GetMemberType(member.Member));
-            var entityId = !string.IsNullOrEmpty(attr.RelatedEntityId) ? attr.RelatedEntityId : this.GetEntityId(relatedEntityType);
-            return this.GetReferencedEntity(relatedEntityType, entityId, "Assocation.RelatedEntityId");
-        }
-
-        private IReadOnlyList<MappedColumnMember> GetAssociationKeyMembers(
-            MappedAssociationMember member,
-            AssociationAttribute attr)
-        {
-            return !string.IsNullOrEmpty(attr.KeyMembers)
-                ? this.GetReferencedColumnMembers(member.Entity, attr.KeyMembers, "Association.KeyMembers", member.Entity.Type)
-                : ReadOnlyList<MappedColumnMember>.Empty;
-        }
-
-        private IReadOnlyList<MappedColumnMember> GetAssociationRelatedKeyMembers(
-            MappedAssociationMember member, 
-            AssociationAttribute attr)
-        {
-            return !string.IsNullOrEmpty(attr.RelatedKeyMembers)
-                ? this.GetReferencedColumnMembers(member.RelatedEntity, attr.RelatedKeyMembers, "Association.RelatedKeyMembers", member.Entity.Type)
-                : ReadOnlyList<MappedColumnMember>.Empty;
-        }
-
-        private IReadOnlyList<MappedColumnMember> GetReferencedColumnMembers(
-            MappedEntity entity, string memberNames, string source, Type sourceType)
-        {
-            return memberNames
-                .Split(_nameListSeparators)
-                .Select(n => this.GetReferencedColumnMember(entity, n, source, sourceType))
-                .ToReadOnly();
-        }
-
-        private MappedColumnMember GetReferencedColumnMember(
-            MappedEntity entity, string memberName, string source, Type sourceType)
-        {
-            var mm = entity.ColumnMembers.FirstOrDefault(cm => cm.Member.Name == memberName);
-            if (mm == null)
-            {
-                throw new InvalidOperationException($"AttributeMapping: The member '{entity.Type.Name}.{memberName}' referenced in {source} for '{sourceType.Name}' is not mapped or does not exist");
-            }
-
-            return mm;
-        }
-
-        private MappedEntity GetReferencedEntity(Type entityType, string entityId, string source)
-        {
-            var entity = this.GetEntity(entityType, entityId);
-
-            if (entity == null)
-            {
-                throw new InvalidOperationException(string.Format("The entity '{0}' referenced in {1} of '{2}' does not exist", entityId, source, entityType.Name));
-            }
-
-            return entity;
-        }
-
-        protected override MappedTable CreateTable(
-            MappedEntity entity, string tableId, ParentEntity? parent)
+        protected virtual MappedTable CreateTable(
+            MappedEntity entity, 
+            string tableName)
         {
             var attr =
-                this.GetMappingAttributes(entity.Type, entity.EntityId, parent)
+                this.GetOrCreateMappingAttributes(entity.Type, entity.Id)
                 .OfType<TableBaseAttribute>()
-                .FirstOrDefault(ta => (ta.Id ?? entity.EntityId) == tableId);
+                .FirstOrDefault(ta => (ta.Name ?? entity.Id) == tableName);
+
+            var name = attr?.Name ?? entity.Id;
 
             if (attr is ExtensionTableAttribute exAttr)
             {
                 return new StandardExtensionTable(
                     entity,
-                    attr.Id ?? attr.Name ?? entity.EntityId,
-                    attr.Name ?? entity.EntityId,
-                    () => GetExtensionRelatedTable(entity.PrimaryTable, exAttr),
-                    me => GetExtensionKeyColumnNames(me, exAttr),
-                    me => GetExtensionRelatedMembers(me, exAttr)
+                    name,
+                    me => CreateTableColumns(entity, me),
+                    me => !string.IsNullOrEmpty(exAttr.KeyColumns)
+                        ? GetTableColumns(entity.PrimaryTable, exAttr.KeyColumns)
+                        : ReadOnlyList<MappedColumn>.Empty,
+                    () => GetExtensionRelatedTable(entity, entity.PrimaryTable, exAttr),
+                    me => !string.IsNullOrEmpty(exAttr.RelatedKeyColumns) ? GetTableColumns(me.RelatedTable, exAttr.RelatedKeyColumns) 
+                           : !string.IsNullOrEmpty(exAttr.KeyColumns) ? GetTableColumns(me.RelatedTable, exAttr.KeyColumns)
+                           : ReadOnlyList<MappedColumn>.Empty
                     );
             }
             else
             {
-                return new StandardTable(
+                return new StandardPrimaryTable(
                     entity,
-                    attr.Id ?? attr.Name ?? entity.EntityId,
-                    attr.Name ?? entity.EntityId
+                    name,
+                    me => CreateTableColumns(entity, me)
                     );
             }
         }
@@ -295,21 +242,23 @@ namespace IQToolkit.Entities.Mapping
         private static readonly char[] _nameListSeparators = new char[] { ' ', ',', '|' };
 
         private MappedTable GetExtensionRelatedTable(
-            MappedTable primaryTable, ExtensionTableAttribute attr)
+            MappedEntity entity, MappedTable primaryTable, ExtensionTableAttribute attr)
         {
-            if (!string.IsNullOrEmpty(attr.RelatedTableId)
-                && this.GetOrCreateTable(primaryTable.Entity, attr.RelatedTableId, null) is { } table)
+            if (!string.IsNullOrEmpty(attr.RelatedTableName)
+                && entity.TryGetTable(attr.RelatedTableName, out var relatedTable))
             {
-                return table;
+                return relatedTable;
             }
             else
             {
+                // if related table is not specified, assume it is the primary table,
+                // since extension tables typically extend the primary table.
                 return primaryTable;
             }
         }
 
-        private IReadOnlyList<string> GetExtensionKeyColumnNames(
-            MappedExtensionTable table, ExtensionTableAttribute attr)
+        private IReadOnlyList<string> GetExtensionKeyColumns(
+            ExtensionTable table, ExtensionTableAttribute attr)
         {
             if (!string.IsNullOrEmpty(attr.KeyColumns))
             {
@@ -321,31 +270,124 @@ namespace IQToolkit.Entities.Mapping
             }
         }
 
-        private IReadOnlyList<MappedColumnMember> GetExtensionRelatedMembers(
-            MappedExtensionTable table, ExtensionTableAttribute attr)
+        private IReadOnlyList<MappedColumn> GetExtensionRelatedColumns(
+            ExtensionTable table, ExtensionTableAttribute attr)
         {
             var relatedKeyColumns = attr.RelatedKeyColumns ?? attr.KeyColumns;
             if (!string.IsNullOrEmpty(relatedKeyColumns))
             {
-                return relatedKeyColumns
-                    .Split(_nameListSeparators)
-                    .Select(memberName => table.RelatedTable.Entity.MappedMembers.OfType<MappedColumnMember>().First(cm => cm.Member.Name == memberName))
-                    .ToReadOnly();
+                var columns = new List<MappedColumn>();
+
+                foreach (var keyName in relatedKeyColumns.Split(_nameListSeparators))
+                {
+                    if (table.RelatedTable.TryGetColumn(keyName, out var column))
+                    {
+                        columns.Add(column);
+                    }
+                }
+
+                return columns.ToReadOnly();
             }
             else
             {
-                return ReadOnlyList<MappedColumnMember>.Empty;
+                return ReadOnlyList<MappedColumn>.Empty;
             }
+        }
+
+        private IReadOnlyList<MappedColumn> CreateTableColumns(
+            MappedEntity entity, MappedTable table)
+        {
+            var attributes =
+                this.GetOrCreateMappingAttributes(entity.Type, entity.Id);
+
+            var columns = new List<MappedColumn>();
+            var columnNameToColumnMap = new Dictionary<string, MappedColumn>();
+
+            var columnAttrs = attributes.OfType<ColumnAttribute>().ToList();
+
+            // find all mapped member columns first
+            foreach (var columnAttr in columnAttrs)
+            {
+                var memberName = columnAttr.Member;
+                if (memberName != null
+                    && entity.Type.TryGetDeclaredFieldOrPropertyFromPath(memberName, out var member))
+                {
+                    var columnName = !string.IsNullOrEmpty(columnAttr.Name)
+                        ? columnAttr.Name
+                        : member.Name;
+
+                    var columnTable = (!string.IsNullOrEmpty(columnAttr.Table)
+                            && entity.TryGetTable(columnAttr.Table, out var ctable))
+                        ? ctable
+                        : entity.PrimaryTable;
+
+                    var columnType = !string.IsNullOrEmpty(columnAttr.DbType)
+                        ? columnAttr.DbType
+                        : null;
+
+                    if (!columnNameToColumnMap.TryGetValue(columnName, out var column))
+                    {
+                        column = new StandardColumn(
+                            columnTable,
+                            columnName,
+                            columnType,
+                            isPrimaryKey: columnAttr.IsPrimaryKey,
+                            isReadOnly: columnAttr.IsReadOnly,
+                            isComputed: columnAttr.IsComputed,
+                            isGenerated: columnAttr.IsGenerated,
+                            me => entity.Members.OfType<ColumnMember>().FirstOrDefault(cm => cm.Column == me)
+                            )
+                        {
+                        };
+                        columns.Add(column);
+                        columnNameToColumnMap[column.Name] = column;
+                    }
+                }
+            }
+
+            // find columns listed in extension tables that refer to this table
+            foreach (var tableAttr in attributes.OfType<ExtensionTableAttribute>())
+            {
+                if (tableAttr.RelatedTableName == table.Name
+                    || (string.IsNullOrEmpty(tableAttr.RelatedTableName) && table == entity.PrimaryTable))
+                {
+                    var names = !string.IsNullOrEmpty(tableAttr.RelatedKeyColumns) ? tableAttr.RelatedKeyColumns
+                        : !string.IsNullOrEmpty(tableAttr.KeyColumns) ? tableAttr.KeyColumns
+                        : "";
+
+                    foreach (var keyColumnName in GetNames(names))
+                    {
+                        if (!columnNameToColumnMap.ContainsKey(keyColumnName))
+                        {
+                            // create column, but we don't know anything about it
+                            var column = new StandardColumn(
+                                table,
+                                keyColumnName,
+                                columnType: null,
+                                isPrimaryKey: false,
+                                isReadOnly: false,
+                                isComputed: false,
+                                isGenerated: false,
+                                fnMember: null
+                                );
+                            columns.Add(column);
+                            columnNameToColumnMap[column.Name] = column;
+                        }
+                    }
+                }
+            }
+
+            return columns.ToList();
         }
 
         #region Mapping Attributes
 
-        protected virtual IReadOnlyList<MappingAttribute> GetMappingAttributes(
-            Type entityType, string entityId, ParentEntity? parent)
+        protected virtual IReadOnlyList<MappingAttribute> GetOrCreateMappingAttributes(
+            Type entityType, string entityId)
         {
             if (!_idToAttributes.TryGetValue(entityId, out var attrs))
             {
-                var tmp = CreateMappingAttributes(entityType, entityId, parent);
+                var tmp = CreateMappingAttributes(entityType, entityId);
                 attrs = ImmutableInterlocked.GetOrAdd(ref _idToAttributes, entityId, tmp);
             }
 
@@ -356,215 +398,127 @@ namespace IQToolkit.Entities.Mapping
         /// Creates the list of <see cref="MappingAttribute"/> for the entity.
         /// </summary>
         protected virtual IReadOnlyList<MappingAttribute> CreateMappingAttributes(
-            Type entityType, string entityId, ParentEntity? parent)
+            Type entityType, string entityId)
         {
-            var list = new List<MappingAttribute>();
+            var attributes = new List<MappingAttribute>();
 
-            this.GetDeclaredMappingAttributes(entityType, entityId, parent, list);
+            _entityIdToContextMemberMap.TryGetValue(entityId, out var contextMember);
 
-            if (parent == null)
+            this.GetDeclaredMappingAttributes(entityType, entityId, attributes);
+
+            // if no entity attribute is mentioned, add one
+            if (!attributes.OfType<EntityAttribute>().Any())
             {
-                // if no entity attribute is mentioned, add one
-                if (!list.OfType<EntityAttribute>().Any())
-                {
-                    list.Add(new EntityAttribute { RuntimeType = entityType });
-                }
+                attributes.Add(new EntityAttribute { ConstructedType = entityType });
+            }
 
-                // if no table attribute is mentioned, add one based on the entity type name
-                if (!list.OfType<TableAttribute>().Any())
+            // if no table attribute is mentioned, add one based on the context member or entity type
+            var tableAttr = attributes.OfType<TableAttribute>().FirstOrDefault();
+            if (tableAttr == null)
+            {
+                attributes.Add(new TableAttribute { Name = contextMember?.Name ?? entityType.Name });
+            }
+            else if (string.IsNullOrEmpty(tableAttr.Name))
+            {
+                tableAttr.Name = contextMember?.Name ?? entityType.Name;
+            }
+
+            // add any implicit member mappings
+            var memberToAttributeMap = new Dictionary<MemberInfo, MemberAttribute>();
+            foreach (var attr in attributes)
+            {
+                if (attr is MemberAttribute ma 
+                    && ma.Member != null
+                    && entityType.TryGetDeclaredFieldOrPropertyFromPath(ma.Member, out var member))
                 {
-                    list.Add(new TableAttribute { Name = entityType.Name });
+                    memberToAttributeMap[member] = ma;
                 }
             }
 
-            var membersAlreadyMapped = new HashSet<string>(
-                list.OfType<MemberAttribute>().Select(m => m.Member).OfType<string>());
+            AddImplicitlyMappedMembers(entityType, memberToAttributeMap, attributes, "");
 
-            // look for members that are not explicitly mapped and create column mappings for them.
-            var dataMembers = TypeHelper.GetDeclaredFieldsAndProperties(entityType);
-                            
-            foreach (var member in dataMembers)
-            {
-                 // member already declared explicity - don't infer an attribute
-                if (membersAlreadyMapped.Contains(member.Name))
-                {
-                    continue;
-                }
-
-                var memberType = TypeHelper.GetMemberType(member);
-                if (IsScalar(memberType))
-                {
-                    // members with scalar type are assumed to be columns
-                    list.Add(new ColumnAttribute { Member = member.Name });
-                }
-                else if (!TypeHelper.IsSequenceType(memberType))
-                {
-                    // members with non-sequence/non-scalar types are assumed to be nested entities
-                    list.Add(new NestedEntityAttribute { Member = member.Name });
-                }
-            }
-
-            return list.ToReadOnly();
+            return attributes.ToReadOnly();
         }
 
-        private static bool IsScalar(Type type)
+        /// <summary>
+        /// Adds attributes for members that were not explicitly mapped, 
+        /// but should be implicitly mapped.
+        /// </summary>
+        private void AddImplicitlyMappedMembers(
+            Type type, 
+            Dictionary<MemberInfo, MemberAttribute> memberToAttributeMap, 
+            List<MappingAttribute> list,
+            string path)
         {
-            type = TypeHelper.GetNonNullableType(type);
-            switch (Type.GetTypeCode(type))
+            // look for members that are not explicitly mapped and create column mappings for them.
+            var dataMembers = type.GetDeclaredFieldsAndProperties();
+
+            foreach (var member in dataMembers)
             {
-                case TypeCode.Empty:
-                    return false;
-                case TypeCode.Object:
-                    return
-                        type == typeof(DateTimeOffset) ||
-                        type == typeof(TimeSpan) ||
-                        type == typeof(Guid) ||
-                        type == typeof(byte[]);
-                default:
-                    return true;
+                var memberPath = CombinePath(path, member.Name);
+
+                var memberType = TypeHelper.GetMemberType(member);
+                if (IsPossibleColumnMember(member))
+                {
+                    // members with scalar type are assumed to be columns
+                    if (!memberToAttributeMap.ContainsKey(member))
+                    {
+                        var attr = new ColumnAttribute { Member = memberPath };
+                        list.Add(attr);
+                        memberToAttributeMap.Add(member, attr);
+                    }
+                }
+                else if (IsPossibleCompoundMember(member))
+                {
+                    // members with non-sequence/non-scalar types are assumed to be nested entities
+                    if (!memberToAttributeMap.TryGetValue(member, out var attr))
+                    {
+                        attr = new CompoundAttribute { Member = memberPath };
+                        list.Add(attr);
+                        memberToAttributeMap.Add(member, attr);
+                    }
+
+                    if (attr is CompoundAttribute)
+                    {
+                        // look for unmapped members of the compound member
+                        AddImplicitlyMappedMembers(memberType, memberToAttributeMap, list, memberPath);
+                    }
+                }
             }
+        }
+
+        private string CombinePath(string basePath, string member)
+        {
+            if (basePath == "")
+                return member;
+            return basePath + "." + member;
         }
 
         /// <summary>
         /// Gets the <see cref="MappingAttribute"/> declared by the user for the entity type.
         /// </summary>
         protected virtual void GetDeclaredMappingAttributes(
-            Type entityType, string entityId, ParentEntity? parent, List<MappingAttribute> list)
+            Type entityType, string entityId, List<MappingAttribute> list)
         {
-            if (parent != null)
-            {
-                this.GetNestedDeclaredMappingAttributes(parent, null, list);
-            }
-            else if (this.ContextType != null
+            if (this.ContextType != null
                 && this.TryGetContextMember(entityId, out var contextMember))
             { 
                 this.GetMemberMappingAttributes(contextMember, list);
-                this.RemoveMembersNotInPath(contextMember.Name, list);
             }
 
             this.GetTypeMappingAttributes(entityType, list);
-            this.RemoveMembersNotInPath("", list);
-        }
-
-        private void GetNestedDeclaredMappingAttributes(
-            ParentEntity parent, string? nestedPath, List<MappingAttribute> list)
-        {
-            var nestedList = new List<MappingAttribute>();
-
-            var pathInParent = nestedPath != null ? parent.Member.Name + "." + nestedPath : parent.Member.Name;
-
-            if (parent.Member != null)
-            {
-                this.GetMemberMappingAttributes(parent.Member, nestedList);
-            }
-            else
-            {
-                this.GetTypeMappingAttributes(parent.EntityType, nestedList);
-            }
-
-            this.RemoveNonMembers(nestedList);
-            this.RemoveMembersNotInPath(pathInParent, nestedList);
-
-            list.AddRange(nestedList);
-
-            if (parent.Parent != null)
-            {
-                this.GetNestedDeclaredMappingAttributes(parent.Parent, pathInParent, list);
-            }
-            else if (this.ContextType != null
-                && this.TryGetContextMember(parent.EntityId, out var contextMember))
-            {
-                nestedList.Clear();
-                this.GetMemberMappingAttributes(contextMember, nestedList);
-                var pathInContext = contextMember.Name + "." + pathInParent;
-                this.RemoveNonMembers(nestedList);
-                this.RemoveMembersNotInPath(pathInContext, nestedList);
-                list.AddRange(nestedList);
-            }
-        }
-
-        private void RemoveNonMembers(List<MappingAttribute> list)
-        {
-            // remove all non-nested attributes
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                var ma = list[i] as MemberAttribute;
-                if (ma == null)
-                {
-                    list.RemoveAt(i);
-                    continue;
-                }
-            }
-        }
-
-        private void RemoveMembersNotInPath(string memberPath, List<MappingAttribute> list)
-        {
-            memberPath = memberPath.Length > 0 ? memberPath + "." : memberPath;
-
-            // remove all non-nested attributes
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                var ma = list[i] as MemberAttribute;
-                if (ma != null && ma.Member != null)
-                {
-                    if (!ma.Member.StartsWith(memberPath))
-                    {
-                        list.RemoveAt(i);
-                        continue;
-                    }
-
-                    var name = memberPath.Length > 0 ? ma.Member.Substring(memberPath.Length) : ma.Member;
-                    if (name.Contains("."))
-                    {
-                        // further nested members not included
-                        list.RemoveAt(i);
-                        continue;
-                    }
-
-                    if (ma.Member != name)
-                    {
-                        // adjust member name so it refers to the correct member in parent
-                        ma.Member = name;
-                    }
-                }
-            }
         }
 
         private void GetMemberMappingAttributes(MemberInfo member, List<MappingAttribute> list)
         {
-            Type memberType = TypeHelper.GetMemberType(member);
-            var path = member.Name + ".";
-
-            foreach (var ma in (MappingAttribute[])member.GetCustomAttributes(typeof(MappingAttribute)))
+            foreach (var attr in member.GetCustomAttributes<MappingAttribute>())
             {
-                var entity = ma as EntityAttribute;
-                if (entity != null && entity.RuntimeType == null)
+                if (attr is MemberAttribute ma && ma.Member == null)
                 {
-                    entity.RuntimeType = TypeHelper.GetSequenceElementType(memberType);
+                    ma.Member = member.Name;
                 }
 
-                var table = ma as TableAttribute;
-                if (table != null && string.IsNullOrEmpty(table.Name))
-                {
-                    table.Name = member.Name;
-                }
-
-                var memattr = ma as MemberAttribute;
-                if (memattr != null)
-                {
-                    if (memattr.Member == null)
-                    {
-                        memattr.Member = member.Name;
-                    }
-                    else if (memattr.Member != member.Name && !memattr.Member.StartsWith(path))
-                    {
-                        // adjust any member names if they do not start with the known member name 
-                        // assume it is a nested entity member name
-                        memattr.Member = path + memattr.Member;
-                    }
-                }
-
-                list.Add(ma);
+                list.Add(attr);
             }
         }
 
@@ -574,9 +528,9 @@ namespace IQToolkit.Entities.Mapping
             foreach (var ma in entityType.GetCustomAttributes<MappingAttribute>())
             {
                 var entity = ma as EntityAttribute;
-                if (entity != null && entity.RuntimeType == null)
+                if (entity != null && entity.ConstructedType == null)
                 {
-                    entity.RuntimeType = entityType;
+                    entity.ConstructedType = entityType;
                 }
 
                 var table = ma as TableAttribute;
@@ -593,6 +547,7 @@ namespace IQToolkit.Entities.Mapping
                 this.GetMemberMappingAttributes(member, list);
             }
         }
-        #endregion
+
+#endregion
     }
 }

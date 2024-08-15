@@ -206,8 +206,7 @@ namespace IQToolkit
                     if (fnType.FullName.StartsWith("System.Func`"))
                     {
                         var typeArgs = fnType.GenericTypeArguments;
-                        var method = this.GetType().FindDeclaredMethod("FastInvoke"+typeArgs.Length);
-                        if (method != null)
+                        if (this.GetType().TryGetDeclaredMethod("FastInvoke" + typeArgs.Length, out var method))
                         {
                             _invoker = (Func<object?[], object?>)method.MakeGenericMethod(typeArgs).CreateDelegate(typeof(Func<object[], object>), this);
                         }

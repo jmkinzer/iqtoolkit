@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -19,8 +20,8 @@ namespace IQToolkit.Utils
         /// inherited from or implemented by the type.
         /// </summary>
         public static bool TryGetGenericType(
-            this Type type, 
-            Type genericDefinition, 
+            this Type type,
+            Type genericDefinition,
             out Type genericType)
         {
             if (type.IsGenericType
@@ -39,7 +40,7 @@ namespace IQToolkit.Utils
                 }
             }
 
-            if (type.BaseType is Type baseType 
+            if (type.BaseType is Type baseType
                 && baseType != typeof(object))
             {
                 return TryGetGenericType(baseType, genericDefinition, out genericType);
@@ -67,7 +68,7 @@ namespace IQToolkit.Utils
             Type genericTypeDefinition)
         {
             return type.TryGetGenericType(genericTypeDefinition, out _);
-        }          
+        }
 
         /// <summary>
         /// Returns true if the type is a collection type (not scalar).
@@ -118,8 +119,8 @@ namespace IQToolkit.Utils
         /// </summary>
         public static bool IsNullableType(Type type)
         {
-            return type != null 
-                && type.IsGenericType 
+            return type != null
+                && type.IsGenericType
                 && type.GetGenericTypeDefinition() == typeof(Nullable<>);
         }
 
@@ -268,8 +269,8 @@ namespace IQToolkit.Utils
         /// Does not include indexer properties.
         /// </summary>
         public static IReadOnlyList<MemberInfo> GetDeclaredFieldsAndProperties(
-            this Type type, 
-            string name, 
+            this Type type,
+            string name,
             Func<MemberInfo, bool>? fnMatch = null,
             bool includeNonPublic = false)
         {
@@ -279,21 +280,48 @@ namespace IQToolkit.Utils
                     && (fnMatch == null || fnMatch(m)),
                 includeNonPublic
                 )
-                .ToReadOnly();               
+                .ToReadOnly();
         }
 
         /// <summary>
         /// Returns the matching instance field or property or null if not found.
         /// Does not include indexer properties.
         /// </summary>
-        public static MemberInfo? FindDeclaredFieldOrProperty(
+        public static bool TryGetDeclaredFieldOrProperty(
             this Type type,
             string name,
-            Func<MemberInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<MemberInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out MemberInfo member)
         {
-            return GetDeclaredFieldsAndProperties(type, name, fnMatch, includeNonPublic)
+            member = GetDeclaredFieldsAndProperties(type, name, fnMatch, includeNonPublic)
                 .FirstOrDefault();
+            return member != null;
+        }
+
+        /// <summary>
+        /// Returns the matching instance field or property or null if not found.
+        /// Does not include indexer properties.
+        /// </summary>
+        public static bool TryGetDeclaredFieldOrProperty(
+            this Type type,
+            string name,
+            Func<MemberInfo, bool>? fnMatch,
+            [NotNullWhen(true)] out MemberInfo? member)
+        {
+            return TryGetDeclaredFieldOrProperty(type, name, fnMatch, includeNonPublic: false, out member);
+        }
+
+        /// <summary>
+        /// Returns the matching instance field or property or null if not found.
+        /// Does not include indexer properties.
+        /// </summary>
+        public static bool TryGetDeclaredFieldOrProperty(
+            this Type type,
+            string name,
+            [NotNullWhen(true)] out MemberInfo? member)
+        {
+            return TryGetDeclaredFieldOrProperty(type, name, fnMatch: null, includeNonPublic: false, out member);
         }
 
         private static readonly char[] dotSeparator = new char[] { '.' };
@@ -301,29 +329,31 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the matching field or property identified by the dotted path, or null if not found.
         /// </summary>
-        public static MemberInfo? FindDeclaredFieldOrPropertyFromPath(this Type type, string path)
+        public static bool TryGetDeclaredFieldOrPropertyFromPath(
+            this Type type,
+            string path,
+            [NotNullWhen(true)] out MemberInfo? member)
         {
-            MemberInfo? member = null;
+            member = null;
             string[] names = path.Split(dotSeparator);
 
             foreach (string name in names)
             {
-                member = FindDeclaredFieldOrProperty(type, name, includeNonPublic: true);
-                if (member == null)
-                    return null;
+                if (!TryGetDeclaredFieldOrProperty(type, name, fnMatch: null, includeNonPublic: true, out member))
+                    return false;
 
                 type = GetEntityType(member);
             }
 
-            return member;
+            return member != null;
         }
 
         /// <summary>
         /// Gets the value of the field or property.
         /// </summary>
         public static bool TryGetFieldOrPropertyValue(
-            this MemberInfo fieldOrProperty, 
-            object? instance, 
+            this MemberInfo fieldOrProperty,
+            object? instance,
             out object? value)
         {
             if (fieldOrProperty is PropertyInfo prop
@@ -350,7 +380,7 @@ namespace IQToolkit.Utils
         /// Gets the value of the field or property.
         /// </summary>
         public static object? GetFieldOrPropertyValue(
-            this MemberInfo fieldOrProperty, 
+            this MemberInfo fieldOrProperty,
             object? instance)
         {
             return TryGetFieldOrPropertyValue(fieldOrProperty, instance, out var value)
@@ -362,8 +392,8 @@ namespace IQToolkit.Utils
         /// Sets the value of the field or property.
         /// </summary>
         public static bool TrySetFieldOrPropertyValue(
-            this MemberInfo fieldOrProperty, 
-            object? instance, 
+            this MemberInfo fieldOrProperty,
+            object? instance,
             object? value)
         {
             if (fieldOrProperty is PropertyInfo prop
@@ -391,8 +421,8 @@ namespace IQToolkit.Utils
         /// Sets the value of the field or property.
         /// </summary>
         public static void SetFieldOrPropertyValue(
-            this MemberInfo fieldOrProperty, 
-            object? instance, 
+            this MemberInfo fieldOrProperty,
+            object? instance,
             object? value)
         {
             if (!fieldOrProperty.TrySetFieldOrPropertyValue(instance, value))
@@ -420,39 +450,41 @@ namespace IQToolkit.Utils
         /// Returns the matching declared instance property of the type or null if not found.
         /// Does not include indexer properties.
         /// </summary>
-        public static PropertyInfo? FindDeclaredProperty(
+        public static bool TryGetDeclaredProperty(
             this Type type,
-            Func<PropertyInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<PropertyInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out PropertyInfo? property)
         {
-            return type.GetProperties(GetDeclaredBindingFlags(includeNonPublic))
+            property = type.GetProperties(GetDeclaredBindingFlags(includeNonPublic))
                 .FirstOrDefault(p => p.CanRead
                     && p.GetIndexParameters().Length == 0
                     && (fnMatch == null || fnMatch(p))
                     );
+            return property != null;
         }
 
         /// <summary>
         /// Returns the matching declared instance property of the type or null if not found.
         /// Does not include indexer properties.
         /// </summary>
-        public static PropertyInfo? FindDeclaredProperty(
+        public static bool TryGetDeclaredProperty(
             this Type type,
             string name,
-            Func<PropertyInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            [NotNullWhen(true)] out PropertyInfo? property)
         {
-            return FindDeclaredProperty(
+            return TryGetDeclaredProperty(
                 type,
-                p => name == p.Name && (fnMatch == null || fnMatch(p)),
-                includeNonPublic
+                p => name == p.Name,
+                includeNonPublic: false,
+                out property
                 );
         }
 
         /// <summary>
         /// Returns the matching declared instance indexer properties.
         /// </summary>
-        public static IReadOnlyList<PropertyInfo> GetDeclaredIndexer(
+        public static IReadOnlyList<PropertyInfo> GetDeclaredIndexers(
             this Type type,
             Func<PropertyInfo, bool>? fnMatch = null,
             bool includeNonPublic = false)
@@ -468,31 +500,33 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the matching declared instance indexer property or null if not found.
         /// </summary>
-        public static PropertyInfo? FindDeclaredIndexer(
+        public static bool TryGetDeclaredIndexer(
             this Type type,
-            Func<PropertyInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<PropertyInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out PropertyInfo? indexer)
         {
-            return type.GetProperties(GetDeclaredBindingFlags(includeNonPublic))
+            indexer = type.GetProperties(GetDeclaredBindingFlags(includeNonPublic))
                 .FirstOrDefault(p => p.CanRead
                     && p.GetIndexParameters().Length > 0
                     && (fnMatch == null || fnMatch(p))
                     );
+            return indexer != null;
         }
 
         /// <summary>
         /// Returns the matching declared instance indexer property or null if not found.
         /// </summary>
-        public static PropertyInfo? FindDeclaredIndexer(
+        public static bool TryGetDeclaredIndexer(
             this Type type,
             string name,
-            Func<PropertyInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            [NotNullWhen(true)] out PropertyInfo? indexer)
         {
-            return FindDeclaredIndexer(
+            return TryGetDeclaredIndexer(
                 type,
-                p => name == p.Name && (fnMatch == null || fnMatch(p)),
-                includeNonPublic
+                p => name == p.Name,
+                includeNonPublic: false,
+                out indexer
                 );
         }
 
@@ -512,13 +546,15 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the first matching declared instance method or null.
         /// </summary>
-        public static MethodInfo? FindDeclaredMethod(
+        public static bool TryGetDeclaredMethod(
             this Type type,
-            Func<MethodInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<MethodInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out MethodInfo? method)
         {
-            return type.GetMethods(GetDeclaredBindingFlags(includeNonPublic))
+            method = type.GetMethods(GetDeclaredBindingFlags(includeNonPublic))
                 .FirstOrDefault(m => fnMatch == null || fnMatch(m));
+            return method != null;
         }
 
         /// <summary>
@@ -540,16 +576,34 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the first matching declared instance method or null.
         /// </summary>
-        public static MethodInfo? FindDeclaredMethod(
+        public static bool TryGetDeclaredMethod(
             this Type type,
             string name,
-            Func<MethodInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<MethodInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out MethodInfo? method)
         {
-            return FindDeclaredMethod(
+            return TryGetDeclaredMethod(
                 type,
                 m => m.Name == name && (fnMatch == null || fnMatch(m)),
-                includeNonPublic
+                includeNonPublic,
+                out method
+                );
+        }
+
+        /// <summary>
+        /// Returns the first matching declared instance method or null.
+        /// </summary>
+        public static bool TryGetDeclaredMethod(
+            this Type type,
+            string name,
+            [NotNullWhen(true)] out MethodInfo? method)
+        {
+            return TryGetDeclaredMethod(
+                type,
+                m => m.Name == name,
+                includeNonPublic: false,
+                out method
                 );
         }
 
@@ -566,7 +620,7 @@ namespace IQToolkit.Utils
             return GetDeclaredMethods(type,
                 name,
                 m => !m.IsGenericMethod
-                    && ParametersMatch(m.GetParameters(), parameterTypes) 
+                    && ParametersMatch(m.GetParameters(), parameterTypes)
                     && (fnMatch == null || fnMatch(m)),
                 includeNonPublic
                 );
@@ -575,19 +629,22 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the first matching declared instance method or null.
         /// </summary>
-        public static MethodInfo? FindDeclaredMethod(
+        public static bool TryGetDeclaredMethod(
             this Type type,
             string name,
             IReadOnlyList<Type> parameterTypes,
-            Func<MethodInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<MethodInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out MethodInfo? method)
         {
-            return FindDeclaredMethod(type,
+            return TryGetDeclaredMethod(
+                type,
                 name,
                 m => !m.IsGenericMethod
                     && ParametersMatch(m.GetParameters(), parameterTypes)
                     && (fnMatch == null || fnMatch(m)),
-                includeNonPublic
+                includeNonPublic,
+                out method
                 );
         }
 
@@ -623,18 +680,19 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the first matching declared instance method or null.
         /// </summary>
-        public static MethodInfo? FindDeclaredMethod(
+        public static bool TryGetDeclaredMethod(
             this Type type,
             string name,
             IReadOnlyList<Type> typeArguments,
             IReadOnlyList<Type> parameterTypes,
-            Func<MethodInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<MethodInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out MethodInfo? method)
         {
             if (!(typeArguments is Type[] argsArray))
                 argsArray = typeArguments.ToArray();
 
-            var method = FindDeclaredMethod(
+            if (TryGetDeclaredMethod(
                 type,
                 m => m.IsGenericMethodDefinition
                     && m.Name == name
@@ -643,12 +701,16 @@ namespace IQToolkit.Utils
                     && m.MakeGenericMethod(argsArray) is { } constructedMethod
                     && ParametersMatch(constructedMethod.GetParameters(), parameterTypes)
                     && (fnMatch == null || fnMatch(constructedMethod)),
-                includeNonPublic
-                );
+                includeNonPublic,
+                out var methodDefinition
+                ))
+            {
+                method = methodDefinition.MakeGenericMethod(argsArray);
+                return true;
+            }
 
-            return method != null
-                ? method.MakeGenericMethod(argsArray)
-                : null;
+            method = default;
+            return false;
         }
 
         /// <summary>
@@ -667,29 +729,30 @@ namespace IQToolkit.Utils
         /// <summary>
         /// Returns the first matching declared instance constructor.
         /// </summary>
-        public static ConstructorInfo? FindDeclaredConstructor(
+        public static bool TryGetDeclaredConstructor(
             this Type type,
-            Func<ConstructorInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            Func<ConstructorInfo, bool>? fnMatch,
+            bool includeNonPublic,
+            [NotNullWhen(true)] out ConstructorInfo? constructor)
         {
-            return type.GetConstructors(GetDeclaredBindingFlags(includeNonPublic))
+            constructor = type.GetConstructors(GetDeclaredBindingFlags(includeNonPublic))
                 .FirstOrDefault(c => fnMatch == null || fnMatch(c));
+            return constructor != null;
         }
 
         /// <summary>
         /// Returns the first matching declared instance constructor.
         /// </summary>
-        public static ConstructorInfo? FindDeclaredConstructor(
+        public static bool TryGetDeclaredConstructor(
             this Type type, 
             IReadOnlyList<Type> parameterTypes,
-            Func<ConstructorInfo, bool>? fnMatch = null,
-            bool includeNonPublic = false)
+            [NotNullWhen(true)] out ConstructorInfo? constructor)
         {
-            return FindDeclaredConstructor(
+            return TryGetDeclaredConstructor(
                 type, 
-                c => ParametersMatch(c.GetParameters(), parameterTypes) 
-                    && (fnMatch == null || fnMatch(c)), 
-                includeNonPublic
+                c => ParametersMatch(c.GetParameters(), parameterTypes), 
+                includeNonPublic: false,
+                out constructor
                 );
         }
 

@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <Compile Include="..\Test.Shared\NorthwindExecutionTests.cs" Link="NorthwindExecutionTests.cs" />
+    <Compile Include="..\Test.Shared\NorthwindMappingTests.cs" Link="NorthwindMappingTests.cs" />
+    <Compile Include="..\Test.Shared\TestBase.cs" Link="TestBase.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -57,10 +57,12 @@ namespace IQToolkit.Entities
             var policed = police.ApplyPolicyRewrites(mapped, linguist, mapper);
             var translation = linguist.ApplyLanguageRewrites(policed, mapper, police);
 
+            typeof(IQueryable).TryGetDeclaredProperty("Provider", out var providerProp);
+
             // look for and use executor found in query itself. (for session executor)
             var runtimeProvider = Find(evaluated, lambda?.Parameters, typeof(IEntityProvider))
                 ?? (Find(evaluated, lambda?.Parameters, typeof(IQueryable)) is { } rootQueryable
-                        ? Expression.Property(rootQueryable, TypeHelper.FindDeclaredProperty(typeof(IQueryable), "Provider"))
+                        ? Expression.Property(rootQueryable, providerProp)
                         : null);
 
             var executorValue = runtimeProvider != null

@@ -52,7 +52,10 @@ namespace IQToolkit.Entities.Translation
                 else if (expectedType.IsGenericType && expectedType.GetGenericTypeDefinition().IsAssignableFrom(typeof(IList<>)))
                 {
                     var gt = typeof(DeferredList<>).MakeGenericType(expectedType.GenericTypeArguments);
-                    var cn = TypeHelper.FindDeclaredConstructor(gt, new Type[] {typeof(IEnumerable<>).MakeGenericType(expectedType.GenericTypeArguments)});
+                    gt.TryGetDeclaredConstructor(
+                        new Type[] {typeof(IEnumerable<>).MakeGenericType(expectedType.GenericTypeArguments)},
+                        out var cn
+                        );
                     body = Expression.New(cn, CoerceElement(expectedElementType, p));
                 }
                 else if (expectedType.IsAssignableFrom(typeof(List<>).MakeGenericType(actualElementType)))
@@ -63,8 +66,7 @@ namespace IQToolkit.Entities.Translation
                 else
                 {
                     // some other collection type that has a constructor that takes IEnumerable<T>
-                    var ci = TypeHelper.FindDeclaredConstructor(expectedType, new Type[] { actualType });
-                    if (ci != null)
+                    if (expectedType.TryGetDeclaredConstructor(new Type[] { actualType }, out var ci))
                     {
                         body = Expression.New(ci, p);
                     }

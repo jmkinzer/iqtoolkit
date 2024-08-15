@@ -18,13 +18,12 @@ namespace IQToolkit.Entities.Mapping
         public string? KeyColumns { get; set; }
 
         /// <summary>
-        /// The id of the primary table used in advanced multi-table mapping.
-        /// If not specified, the related table ID is the primary table's ID.
+        /// The name of the related table used in advanced multi-table mapping.
         /// </summary>
-        public string? RelatedTableId { get; set; }
+        public string? RelatedTableName { get; set; }
 
         /// <summary>
-        /// The columns in the primary table that correspond to the key columns in the extension table.
+        /// The columns in the related table that correspond to the key columns in the extension table.
         /// If not specified, it is assumed the column names from both tables are the same.
         /// </summary>
         public string? RelatedKeyColumns { get; set; }

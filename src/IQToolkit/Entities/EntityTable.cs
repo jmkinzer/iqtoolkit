@@ -50,7 +50,7 @@ namespace IQToolkit.Entities
         /// <summary>
         /// The ID of the database table.
         /// </summary>
-        public string EntityId => _entity.EntityId;
+        public string EntityId => _entity.Id;
 
         /// <summary>
         /// Gets the entity from the database by its id (primary key value).

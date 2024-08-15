@@ -45,7 +45,7 @@ namespace IQToolkit.Access
             return AccessFormatter.Singleton.Format(expression, options);
         }
 
-        public override Expression GetGeneratedIdExpression(MappedColumnMember member)
+        public override Expression GetGeneratedIdExpression(ColumnMember member)
         {
             return new ScalarFunctionCallExpression(TypeHelper.GetMemberType(member.Member), false, "@@IDENTITY", null);
         }

@@ -12,6 +12,7 @@ namespace IQToolkit.Entities.Translation
     using Expressions;
     using Expressions.Sql;
     using Mapping;
+    using System.Diagnostics.CodeAnalysis;
     using Utils;
 
     /// <summary>
@@ -43,28 +44,57 @@ namespace IQToolkit.Entities.Translation
             return result;
         }
 
+        /// <summary>
+        /// The query language specific type for the column
+        /// </summary>
+        public virtual QueryType GetColumnType(
+            ColumnMember member,
+            QueryLanguage language)
+        {
+            return GetColumnType(member.Column, language);
+        }
 
         /// <summary>
         /// The query language specific type for the column
         /// </summary>
         public virtual QueryType GetColumnType(
-            MappedColumnMember member,
+            MappedColumn column,
             QueryLanguage language)
         {
-            if (member.ColumnType != null)
+            if (column.Type != null
+                && language.TypeSystem.Parse(column.Type) is { } parsedType)
             {
-                return language.TypeSystem.Parse(member.ColumnType) ?? QueryType.Unknown;
+                return parsedType;
             }
 
-            return language.TypeSystem.GetQueryType(TypeHelper.GetMemberType(member.Member))!;
+            if (column.Member != null)
+            {
+                return language.TypeSystem.GetQueryType(TypeHelper.GetMemberType(column.Member.Member));
+            }
+
+            return QueryType.Unknown;
         }
 
-        public class EntityAssignment
+        public virtual Type GetMemberType(
+            ColumnMember member)
+        {
+            return TypeHelper.GetMemberType(member.Member);
+        }
+
+        public virtual Type GetMemberType(
+            MappedColumn column)
+        {
+            return column.Member != null
+                ? GetMemberType(column.Member)
+                : typeof(string);
+        }
+
+        public class ConstructAssignment
         {
             public MemberInfo Member { get; }
             public Expression Expression { get; }
 
-            public EntityAssignment(MemberInfo member, Expression expression)
+            public ConstructAssignment(MemberInfo member, Expression expression)
             {
                 if (member == null)
                     throw new ArgumentNullException(nameof(member));
@@ -76,13 +106,16 @@ namespace IQToolkit.Entities.Translation
             }
         }
 
-        protected virtual Expression BuildEntityExpression(MappedEntity entity, IReadOnlyList<EntityAssignment> assignments)
+        protected virtual Expression BuildConstructionExpression(
+            Type type, 
+            Type constructedType, 
+            IReadOnlyList<ConstructAssignment> assignments)
         {
             NewExpression newExpression;
 
             // handle cases where members are not directly assignable
             var readonlyMembers = assignments.Where(b => TypeHelper.IsReadOnly(b.Member)).ToArray();
-            var cons = entity.ConstructedType.GetDeclaredConstructors();
+            var cons = constructedType.GetDeclaredConstructors();
             var hasNoArgConstructor = cons.Any(c => c.GetParameters().Length == 0);
 
             if (readonlyMembers.Length > 0 || !hasNoArgConstructor)
@@ -95,7 +128,7 @@ namespace IQToolkit.Entities.Translation
 
                 if (consThatApply.Count == 0)
                 {
-                    throw new InvalidOperationException(string.Format("Cannot construct type '{0}' with all mapped and included members.", entity.ConstructedType));
+                    throw new InvalidOperationException(string.Format("Cannot construct type '{0}' with all mapped and included members.", constructedType));
                 }
 
                 // just use the first one... (Note: need better algorithm?)
@@ -110,40 +143,42 @@ namespace IQToolkit.Entities.Translation
             }
             else
             {
-                newExpression = Expression.New(entity.ConstructedType);
+                newExpression = Expression.New(constructedType);
             }
 
             Expression result;
             if (assignments.Count > 0)
             {
-                if (entity.Type.IsInterface)
+                if (type.IsInterface)
                 {
-                    assignments = this.RemapAssignments(assignments, entity.ConstructedType).ToList();
+                    assignments = this.RemapAssignments(assignments, constructedType).ToList();
                 }
 
-                result = Expression.MemberInit(newExpression, (MemberBinding[])assignments.Select(a => Expression.Bind(a.Member, a.Expression)).ToArray());
+                result = Expression.MemberInit(
+                    newExpression, 
+                    (MemberBinding[])assignments.Select(a => Expression.Bind(a.Member, a.Expression))
+                    .ToArray());
             }
             else
             {
                 result = newExpression;
             }
 
-            if (entity.Type != entity.ConstructedType)
+            if (type != constructedType)
             {
-                result = Expression.Convert(result, entity.Type);
+                result = Expression.Convert(result, type);
             }
 
             return result;
         }
 
-        private IEnumerable<EntityAssignment> RemapAssignments(IEnumerable<EntityAssignment> assignments, Type entityType)
+        private IEnumerable<ConstructAssignment> RemapAssignments(IEnumerable<ConstructAssignment> assignments, Type entityType)
         {
             foreach (var assign in assignments)
             {
-                var member = TypeHelper.FindDeclaredFieldOrProperty(entityType, assign.Member.Name);
-                if (member != null)
+                if (entityType.TryGetDeclaredFieldOrProperty(assign.Member.Name, out var member))
                 {
-                    yield return new EntityAssignment(member, assign.Expression);
+                    yield return new ConstructAssignment(member, assign.Expression);
                 }
                 else
                 {
@@ -159,13 +194,13 @@ namespace IQToolkit.Entities.Translation
         /// </summary>
         protected virtual ConstructorBindResult? BindConstructor(
             ConstructorInfo cons,
-            IReadOnlyList<EntityAssignment> assignments)
+            IReadOnlyList<ConstructAssignment> assignments)
         {
             var ps = cons.GetParameters();
             var args = new Expression[ps.Length];
             var mis = new MemberInfo[ps.Length];
-            var members = new HashSet<EntityAssignment>(assignments);
-            var used = new HashSet<EntityAssignment>();
+            var members = new HashSet<ConstructAssignment>(assignments);
+            var used = new HashSet<ConstructAssignment>();
 
             for (int i = 0, n = ps.Length; i < n; i++)
             {
@@ -213,9 +248,9 @@ namespace IQToolkit.Entities.Translation
         protected class ConstructorBindResult
         {
             public NewExpression Expression { get; }
-            public IReadOnlyList<EntityAssignment> Remaining { get; }
+            public IReadOnlyList<ConstructAssignment> Remaining { get; }
 
-            public ConstructorBindResult(NewExpression expression, IEnumerable<EntityAssignment> remaining)
+            public ConstructorBindResult(NewExpression expression, IEnumerable<ConstructAssignment> remaining)
             {
                 this.Expression = expression;
                 this.Remaining = remaining.ToReadOnly();
@@ -226,7 +261,7 @@ namespace IQToolkit.Entities.Translation
         {
             if (entity is EntityExpression ex)
             {
-                foreach (var mm in ex.Entity.MappedMembers)
+                foreach (var mm in ex.Entity.Members)
                 {
                     if (policy.IsIncluded(mm.Member))
                         return true;
@@ -247,13 +282,13 @@ namespace IQToolkit.Entities.Translation
                 var assignments = this.GetAssignments(ex.Expression).ToDictionary(ma => ma.Member.Name);
                 bool anyAdded = false;
 
-                foreach (var mm in ex.Entity.MappedMembers)
+                foreach (var mm in ex.Entity.Members)
                 {
-                    EntityAssignment ea;
+                    ConstructAssignment ea;
                     bool okayToInclude = !assignments.TryGetValue(mm.Member.Name, out ea) || IsNullRelationshipAssignment(ex.Entity, ea);
                     if (okayToInclude && fnIsIncluded(mm.Member))
                     {
-                        ea = new EntityAssignment(mm.Member, this.GetMemberExpression(ex.Expression, mm, linguist, police));
+                        ea = new ConstructAssignment(mm.Member, this.GetMemberExpression(ex.Expression, mm, linguist, police));
                         assignments[mm.Member.Name] = ea;
                         anyAdded = true;
                     }
@@ -261,16 +296,22 @@ namespace IQToolkit.Entities.Translation
 
                 if (anyAdded)
                 {
-                    return new EntityExpression(ex.Entity, this.BuildEntityExpression(ex.Entity, assignments.Values.ToList()));
+                    return new EntityExpression(ex.Entity, 
+                        this.BuildConstructionExpression(
+                            ex.Entity.Type, 
+                            ex.Entity.ConstructedType, 
+                            assignments.Values.ToList()
+                        ));
                 }
             }
 
             return entity;
         }
 
-        private bool IsNullRelationshipAssignment(MappedEntity entity, EntityAssignment assignment)
+        private bool IsNullRelationshipAssignment(MappedEntity entity, ConstructAssignment assignment)
         {
-            if (entity.RelationshipMembers.TryGetMemberByName(assignment.Member.Name, out var rm))
+            if (entity.TryGetMember(assignment.Member.Name, out var m)
+                && m is RelationshipMember rm)
             {
                 if (assignment.Expression is ConstantExpression cex 
                     && cex.Value == null)
@@ -280,13 +321,13 @@ namespace IQToolkit.Entities.Translation
             return false;
         }
 
-        private IEnumerable<EntityAssignment> GetAssignments(Expression newOrMemberInit)
+        private IEnumerable<ConstructAssignment> GetAssignments(Expression newOrMemberInit)
         {
-            var assignments = new List<EntityAssignment>();
+            var assignments = new List<ConstructAssignment>();
             
             if (newOrMemberInit is MemberInitExpression minit)
             {
-                assignments.AddRange(minit.Bindings.OfType<MemberAssignment>().Select(a => new EntityAssignment(a.Member, a.Expression)));
+                assignments.AddRange(minit.Bindings.OfType<MemberAssignment>().Select(a => new ConstructAssignment(a.Member, a.Expression)));
                 newOrMemberInit = minit.NewExpression;
             }
 
@@ -296,7 +337,7 @@ namespace IQToolkit.Entities.Translation
                 assignments.AddRange(
                     Enumerable.Range(0, nex.Arguments.Count)
                               .Where(i => nex.Members[i] != null)
-                              .Select(i => new EntityAssignment(nex.Members[i], nex.Arguments[i]))
+                              .Select(i => new ConstructAssignment(nex.Members[i], nex.Arguments[i]))
                               );
             }
 
@@ -312,12 +353,12 @@ namespace IQToolkit.Entities.Translation
             PolicyTranslator police)
         {
             var tableAlias = new TableAlias();
-            var tex = new TableExpression(tableAlias, entity, entity.PrimaryTable.TableName);
+            var tex = new TableExpression(tableAlias, entity, entity.PrimaryTable.Name);
             var aggregator = Aggregator.GetAggregator(selector.Body.Type, typeof(IEnumerable<>).MakeGenericType(selector.Body.Type));
 
             Expression where;
             DeclarationCommand? genIdCommand = null;
-            var generatedIds = entity.PrimaryKeyMembers.Where(pk => pk.IsGenerated).ToList();
+            var generatedIds = entity.PrimaryKeyMembers.Where(pk => pk.Column.IsGenerated).ToList();
             if (generatedIds.Count > 0)
             {
                 if (map == null || !generatedIds.Any(m => map.ContainsKey(m.Member)))
@@ -329,8 +370,9 @@ namespace IQToolkit.Entities.Translation
 
                 // is this just a retrieval of one generated id member?
                 if (selector.Body is MemberExpression mex
-                    && entity.PrimaryKeyMembers.TryGetMemberByName(mex.Member.Name, out var pkMember)
-                    && pkMember.IsGenerated)
+                    && entity.TryGetMember(mex.Member.Name, out var member)
+                    && member is ColumnMember columnMember
+                    && columnMember.Column.IsGenerated)
                 {
                     if (genIdCommand != null && genIdCommand.Source != null)
                     {
@@ -344,7 +386,7 @@ namespace IQToolkit.Entities.Translation
                     else
                     {
                         TableAlias alias = new TableAlias();
-                        var colType = this.GetColumnType(pkMember, linguist.Language);
+                        var colType = this.GetColumnType(columnMember, linguist.Language);
                         return new ClientProjectionExpression(
                             new SelectExpression(alias, new[] { new ColumnDeclaration("", map[mex.Member], colType) }, null, null),
                             new ColumnExpression(TypeHelper.GetMemberType(mex.Member), colType, alias, ""),
@@ -383,7 +425,7 @@ namespace IQToolkit.Entities.Translation
 
         protected virtual DeclarationCommand GetGeneratedIdCommand(
             MappedEntity entity,
-            IReadOnlyList<MappedColumnMember> generatedPkMembers,
+            IReadOnlyList<ColumnMember> generatedPkMembers,
             Dictionary<MemberInfo, Expression> map,
             LanguageTranslator linguist)
         {
@@ -500,8 +542,9 @@ namespace IQToolkit.Entities.Translation
         public virtual IEnumerable<MappedTable> GetDependencyOrderedTables(MappedEntity entity)
         {
             return entity.Tables
-                .Sort(t => t is MappedExtensionTable et
-                    ? new[] { et.RelatedTable }
+                .Sort(t => t is ExtensionTable et
+                    && et.RelatedKeyColumns.Count > 0
+                    ? new[] { et.RelatedKeyColumns[0].Table }
                     : null
                     );
         }
@@ -513,18 +556,25 @@ namespace IQToolkit.Entities.Translation
             PolicyTranslator police)
         {
             // must be some complex type constructed from multiple columns
-            var assignments = new List<EntityAssignment>();
-            foreach (var mm in entity.MappedMembers)
+            var assignments = new List<ConstructAssignment>();
+
+            foreach (var mm in entity.Members)
             {
-                if (mm is MappedNestedEntityMember
-                    || mm is MappedColumnMember)
+                if (mm is CompoundMember
+                    || mm is ColumnMember)
                 {
                     var ee = this.GetMemberExpression(root, mm, linguist, police);
-                    assignments.Add(new EntityAssignment(mm.Member, ee));
+                    assignments.Add(new ConstructAssignment(mm.Member, ee));
                 }
             }
 
-            return new EntityExpression(entity, this.BuildEntityExpression(entity, assignments));
+            return new EntityExpression(
+                entity, 
+                this.BuildConstructionExpression(
+                    entity.Type,
+                    entity.ConstructedType, 
+                    assignments
+                ));
         }
 
         public override Expression GetMemberExpression(
@@ -533,26 +583,58 @@ namespace IQToolkit.Entities.Translation
             LanguageTranslator linguist,
             PolicyTranslator police)
         {
-            if (member is MappedNestedEntityMember nested)
+            if (member is CompoundMember multiMember)
             {
-                return this.GetEntityExpression(root, nested.RelatedEntity, linguist, police);
+                var assignments = new List<ConstructAssignment>();
+
+                foreach (var mm in multiMember.Members)
+                {
+                    if (mm is CompoundMember
+                        || mm is ColumnMember)
+                    {
+                        var ee = this.GetMemberExpression(root, mm, linguist, police);
+                        assignments.Add(new ConstructAssignment(mm.Member, ee));
+                    }
+                }
+
+                return this.BuildConstructionExpression(
+                    multiMember.Type,
+                    multiMember.ConstructedType,
+                    assignments
+                    );
             }
-            else if (member is MappedAssociationMember assoc)
+            else if (member is AssociationMember assoc)
             {
                 var projection = (ClientProjectionExpression)this.GetQueryExpression(assoc.RelatedEntity, linguist, police);
 
                 // make where clause for joining back to 'root'
                 Expression? where = null;
 
-                for (int i = 0, n = assoc.KeyMembers.Count; i < n; i++)
+                for (int i = 0, n = assoc.KeyColumns.Count; i < n; i++)
                 {
-                    var equal =
-                        this.GetMemberExpression(projection.Projector, assoc.KeyMembers[i], linguist, police)
-                            .Equal(this.GetMemberExpression(root, assoc.RelatedKeyMembers[i], linguist, police));
+                    var keyColumn = assoc.KeyColumns[i];
+                    var relatedKeyColumn = assoc.RelatedKeyColumns[i];
 
-                    where = (where != null) 
-                        ? where.And(equal) 
-                        : equal;
+                    var left = keyColumn.Member != null
+                        ? this.GetMemberExpression(projection.Projector, keyColumn.Member, linguist, police)
+                        : this.TryGetColumnExpression(projection.Projector, keyColumn, linguist, out var leftCol)
+                            ? leftCol
+                            : null;
+
+                    var right = relatedKeyColumn.Member != null
+                        ? this.GetMemberExpression(root, relatedKeyColumn.Member, linguist, police)
+                        : this.TryGetColumnExpression(root, relatedKeyColumn, linguist, out var rightCol)
+                            ? rightCol
+                            : null;
+
+                    if (left != null && right != null)
+                    {
+                        var equal = left.Equal(right);
+
+                        where = (where != null)
+                            ? where.And(equal)
+                            : equal;
+                    }
                 }
 
                 var newAlias = new TableAlias();
@@ -566,17 +648,11 @@ namespace IQToolkit.Entities.Translation
 
                 return police.ApplyEntityPolicy(result, member.Member, linguist, this);
             }
-            else if (member is MappedColumnMember cm)
+            else if (member is ColumnMember cm)
             {
-                if (root is AliasedExpression aliasedRoot
-                    && this.GetColumnType(cm, linguist.Language) is { } columnType)
+                if (TryGetColumnExpression(root, cm.Column, linguist, out var columnExpression))
                 {
-                    return new ColumnExpression(
-                        TypeHelper.GetMemberType(cm.Member),
-                        columnType,
-                        aliasedRoot.Alias,
-                        cm.ColumnName
-                        );
+                    return columnExpression;
                 }
                 else
                 {
@@ -589,6 +665,72 @@ namespace IQToolkit.Entities.Translation
             }
         }
 
+        private bool TryGetTableAliasForColumn(
+            Expression? root, MappedColumn column, [NotNullWhen(true)] out TableAlias alias)
+        {
+            if (root is TableExpression table
+                && table.Name == column.Table.Name)
+            {
+                alias = table.Alias;
+                return true;
+            }
+            else if (root is JoinExpression join)
+            {
+                if (this.TryGetTableAliasForColumn(join.Left, column, out alias))
+                    return true;
+                if (this.TryGetTableAliasForColumn(join.Right, column, out alias))
+                    return true;
+            }
+            else if (root is SelectExpression select
+                && TryGetTableAliasForColumn(select.From, column, out var selectAlias))
+            {
+                var selectColumn = select.Columns.FirstOrDefault(c => c.Name == column.Name);
+                if (selectColumn != null)
+                {
+                    alias = select.Alias;
+                    return true;
+                }
+            }
+            else if (root is EntityExpression entityExpr
+                && entityExpr.Entity == column.Table.Entity)
+            {
+                var columnExpr = entityExpr.FindFirstDownOrDefault<ColumnExpression>(e => e.Name == column.Name);
+                if (columnExpr != null)
+                {
+                    alias = columnExpr.Alias;
+                    return true;
+                }
+            }
+
+            alias = default!;
+            return false;
+        }
+
+        public override bool TryGetColumnExpression(
+            Expression root, 
+            MappedColumn column, 
+            LanguageTranslator linguist,
+            [NotNullWhen(true)] out Expression columnExpression)
+        {
+            if (TryGetTableAliasForColumn(root, column, out var alias))
+            {
+                var type = this.GetMemberType(column);
+
+                var dbType = !string.IsNullOrEmpty(column.Type)
+                    && linguist.Language.TypeSystem.Parse(column.Type) is { } parsedType
+                    ? parsedType
+                    : linguist.Language.TypeSystem.GetQueryType(type);
+
+                columnExpression = new ColumnExpression(type, dbType, alias, column.Name);
+                return true;
+            }
+            else
+            {
+                columnExpression = default!;
+                return false;
+            }
+        }
+
         public override Expression GetQueryExpression(
             MappedEntity entity,
             LanguageTranslator linguist,
@@ -598,7 +740,7 @@ namespace IQToolkit.Entities.Translation
             {
                 var tableAlias = new TableAlias();
                 var selectAlias = new TableAlias();
-                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.TableName);
+                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.Name);
 
                 var projector = this.GetEntityExpression(table, entity, linguist, police);
                 var pc = ColumnProjector.ProjectColumns(linguist, projector, null, selectAlias, tableAlias);
@@ -614,27 +756,31 @@ namespace IQToolkit.Entities.Translation
             {
                 var aliases = new Dictionary<string, TableAlias>();
                 
-                var tex = new TableExpression(new TableAlias(), entity, entity.PrimaryTable.TableName);
-                aliases.Add(entity.PrimaryTable.TableId, tex.Alias);
+                var tex = new TableExpression(new TableAlias(), entity, entity.PrimaryTable.Name);
+                aliases.Add(entity.PrimaryTable.Name, tex.Alias);
 
                 Expression source = tex;
 
                 foreach (var table in entity.ExtensionTables)
                 {
                     var joinedTableAlias = new TableAlias();
-                    aliases.Add(table.TableId, joinedTableAlias);
+                    aliases.Add(table.Name, joinedTableAlias);
 
-                    aliases.TryGetValue(table.RelatedTable.TableId, out var relatedTableAlias);
+                    aliases.TryGetValue(table.RelatedTable.Name, out var relatedTableAlias);
 
-                    var joinedTex = new TableExpression(joinedTableAlias, entity, table.TableName);
+                    var joinedTex = new TableExpression(joinedTableAlias, entity, table.Name);
 
                     Expression? cond = null;
-                    for (int i = 0, n = table.KeyColumnNames.Count; i < n; i++)
+                    for (int i = 0, n = table.KeyColumns.Count; i < n; i++)
                     {
-                        var memberType = TypeHelper.GetMemberType(table.RelatedMembers[i].Member);
-                        var colType = this.GetColumnType(table.RelatedMembers[i], linguist.Language);
-                        var relatedColumn = new ColumnExpression(memberType, colType, relatedTableAlias, table.RelatedMembers[i].ColumnName);
-                        var joinedColumn = new ColumnExpression(memberType, colType, joinedTableAlias, table.KeyColumnNames[i]);
+                        var keyColumn = table.KeyColumns[i];
+                        var relatedKeyColumn = table.RelatedKeyColumns[i];
+
+                        var memberType = GetMemberType(keyColumn);
+                        var columnType = GetColumnType(keyColumn, linguist.Language);
+
+                        var relatedColumn = new ColumnExpression(memberType, columnType, relatedTableAlias, keyColumn.Name);
+                        var joinedColumn = new ColumnExpression(memberType, columnType, joinedTableAlias, relatedKeyColumn.Name);
                         var eq = joinedColumn.Equal(relatedColumn);
 
                         cond = (cond != null)
@@ -646,7 +792,7 @@ namespace IQToolkit.Entities.Translation
                 }
 
                 var columns = new List<ColumnDeclaration>();
-                this.GetColumns(entity, aliases, columns, linguist, police);
+                this.GetColumns(entity.Members, aliases, columns, linguist, police);
                 var root = new SelectExpression(new TableAlias(), columns, source, null);
                 var existingAliases = aliases.Values.ToArray();
 
@@ -663,25 +809,24 @@ namespace IQToolkit.Entities.Translation
         }
 
         private void GetColumns(
-            MappedEntity entity,
-            Dictionary<string, TableAlias> aliases,
+            IReadOnlyList<MappedMember> members,
+            Dictionary<string, TableAlias> tableNameToAliasMap,
             List<ColumnDeclaration> columns,
             LanguageTranslator linguist,
             PolicyTranslator police)
         {
-            foreach (var mm in entity.MappedMembers)
+            foreach (var mm in members)
             {
-                if (mm is MappedNestedEntityMember nm)
+                if (mm is CompoundMember mcm)
                 {
-                    this.GetColumns(nm.RelatedEntity, aliases, columns, linguist, police);
+                    GetColumns(mcm.Members, tableNameToAliasMap, columns, linguist, police);
                 }
-                else if (mm is MappedColumnMember cm)
+                else if (mm is ColumnMember cm)
                 {
-                    TableAlias alias;
-                    aliases.TryGetValue(cm.Table.TableId, out alias);
+                    tableNameToAliasMap.TryGetValue(cm.Column.Table.Name, out var alias);
                     var colType = this.GetColumnType(cm, linguist.Language);
-                    ColumnExpression ce = new ColumnExpression(TypeHelper.GetMemberType(cm.Member), colType, alias, cm.ColumnName);
-                    ColumnDeclaration cd = new ColumnDeclaration(cm.ColumnName, ce, colType);
+                    var ce = new ColumnExpression(TypeHelper.GetMemberType(cm.Member), colType, alias, cm.Column.Name);
+                    var cd = new ColumnDeclaration(cm.Column.Name, ce, colType);
                     columns.Add(cd);
                 }
             }
@@ -697,12 +842,12 @@ namespace IQToolkit.Entities.Translation
             if (entity.ExtensionTables.Count == 0)
             {
                 var tableAlias = new TableAlias();
-                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.TableName);
+                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.Name);
                 var assignments = this.GetColumnAssignments(
                     table,
                     instance,
-                    entity,
-                    m => !m.IsGenerated || m.IsReadOnly,
+                    entity.Members,
+                    m => !m.Column.IsGenerated || m.Column.IsReadOnly,
                     null,
                     linguist,
                     police
@@ -728,12 +873,12 @@ namespace IQToolkit.Entities.Translation
                 foreach (var table in this.GetDependencyOrderedTables(entity))
                 {
                     var tableAlias = new TableAlias();
-                    var tex = new TableExpression(tableAlias, entity, table.TableName);
+                    var tex = new TableExpression(tableAlias, entity, table.Name);
                     var assignments = this.GetColumnAssignments(
                         tex,
                         instance,
-                        entity,
-                        m => m.Table.TableId == table.TableId && !m.IsGenerated,
+                        entity.Members,
+                        m => m.Column.Table.Name == table.Name && !m.Column.IsGenerated,
                         vexMap,
                         linguist,
                         police
@@ -745,7 +890,7 @@ namespace IQToolkit.Entities.Translation
 
                     commands.Add(new InsertCommand(tex, totalAssignments));
 
-                    if (map.TryGetValue(table.TableId, out var members))
+                    if (map.TryGetValue(table.Name, out var members))
                     {
                         var d = this.GetDependentGeneratedVariableDeclaration(entity, table, members, instance, vexMap, linguist, police);
                         commands.Add(d);
@@ -761,15 +906,15 @@ namespace IQToolkit.Entities.Translation
             }
         }
 
-        private Dictionary<string, IReadOnlyList<MappedColumnMember>> GetDependentGeneratedColumns(
+        private Dictionary<string, IReadOnlyList<ColumnMember>> GetDependentGeneratedColumns(
             MappedEntity entity)
         {
             return
                 (from xt in entity.ExtensionTables
-                group xt by xt.RelatedTable.TableId)
+                group xt by xt.RelatedTable.Name)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.SelectMany(xt => xt.RelatedMembers).Distinct().ToReadOnly()
+                    g => entity.GetColumnMembers(g.SelectMany(xt => xt.RelatedKeyColumns).Distinct())
                 );
         }
 
@@ -777,7 +922,7 @@ namespace IQToolkit.Entities.Translation
         private CommandExpression GetDependentGeneratedVariableDeclaration(
             MappedEntity entity, 
             MappedTable table, 
-            IReadOnlyList<MappedColumnMember> members, 
+            IReadOnlyList<ColumnMember> members, 
             Expression instance, 
             Dictionary<MemberInfo, Expression> map,
             LanguageTranslator linguist,
@@ -786,7 +931,7 @@ namespace IQToolkit.Entities.Translation
             // first make command that retrieves the generated ids if any
             DeclarationCommand? genIdCommand = null;
             
-            var generatedPkMembers = entity.PrimaryKeyMembers.Where(pk => pk.IsGenerated)
+            var generatedPkMembers = entity.PrimaryKeyMembers.Where(pk => pk.Column.IsGenerated)
                 .ToReadOnly();
 
             if (generatedPkMembers.Count > 0)
@@ -805,7 +950,7 @@ namespace IQToolkit.Entities.Translation
             members = members.Except(generatedPkMembers).ToList();
 
             var tableAlias = new TableAlias();
-            var tex = new TableExpression(tableAlias, entity, table.TableName);
+            var tex = new TableExpression(tableAlias, entity, table.Name);
 
             Expression? where = null;
             if (generatedPkMembers.Count > 0)
@@ -827,7 +972,7 @@ namespace IQToolkit.Entities.Translation
             foreach (var cm in members)
             {
                 var col = (ColumnExpression)this.GetMemberExpression(tex, cm, linguist, police);
-                columns.Add(new ColumnDeclaration(cm.ColumnName, col, col.QueryType));
+                columns.Add(new ColumnDeclaration(cm.Column.Name, col, col.QueryType));
                 var vcol = new ColumnExpression(col.Type, col.QueryType, selectAlias, col.Name);
                 variables.Add(new VariableDeclaration(cm.Member.Name, col.QueryType, vcol));
                 map.Add(cm.Member, new VariableExpression(cm.Member.Name, col.Type, col.QueryType));
@@ -846,15 +991,15 @@ namespace IQToolkit.Entities.Translation
         private IEnumerable<ColumnAssignment> GetColumnAssignments(
             Expression table,
             Expression instance, 
-            MappedEntity entity,
-            Func<MappedColumnMember, bool> fnIncludeColumn,
+            IReadOnlyList<MappedMember> members,
+            Func<ColumnMember, bool> fnIncludeColumn,
             Dictionary<MemberInfo, Expression>? map,
             LanguageTranslator linguist,
             PolicyTranslator police)
         {
-            foreach (var m in entity.MappedMembers)
+            foreach (var m in members)
             {
-                if (m is MappedColumnMember cm 
+                if (m is ColumnMember cm 
                     && fnIncludeColumn(cm))
                 {
                     yield return new ColumnAssignment(
@@ -862,12 +1007,12 @@ namespace IQToolkit.Entities.Translation
                         this.GetMemberAccess(instance, m.Member, map)
                         );
                 }
-                else if (m is MappedNestedEntityMember nm)
+                else if (m is CompoundMember mcm)
                 {
                     var assignments = this.GetColumnAssignments(
                         table,
-                        Expression.MakeMemberAccess(instance, nm.Member),
-                        nm.RelatedEntity,
+                        Expression.MakeMemberAccess(instance, mcm.Member),
+                        mcm.Members,
                         fnIncludeColumn,
                         map,
                         linguist,
@@ -890,15 +1035,22 @@ namespace IQToolkit.Entities.Translation
             LanguageTranslator linguist,
             PolicyTranslator police)
         {
-            if (table is MappedExtensionTable exTable)
+            if (table is ExtensionTable exTable)
             {
-                foreach(var relatedMember in exTable.RelatedMembers)
+                foreach(var relatedColumn in exTable.RelatedKeyColumns)
                 {
-                    var relatedMemberExpression = map[relatedMember.Member];
-                    yield return new ColumnAssignment(
-                        (ColumnExpression)this.GetMemberExpression(expr, relatedMember, linguist, police), 
-                        relatedMemberExpression
-                        );
+                    if (relatedColumn.Member != null)
+                    {
+                        var relatedMemberExpression = map[relatedColumn.Member.Member];
+
+                        if (TryGetColumnExpression(expr, relatedColumn, linguist, out var columnExpr))
+                        {
+                            yield return new ColumnAssignment(
+                                (ColumnExpression)columnExpr,
+                                relatedMemberExpression
+                                );
+                        }
+                    }
                 }
             }
         }
@@ -928,7 +1080,7 @@ namespace IQToolkit.Entities.Translation
             if (entity.ExtensionTables.Count == 0)
             {
                 var tableAlias = new TableAlias();
-                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.TableName);
+                var table = new TableExpression(tableAlias, entity, entity.PrimaryTable.Name);
 
                 var where = this.GetIdentityCheck(table, entity, instance, linguist, police);
 
@@ -942,8 +1094,8 @@ namespace IQToolkit.Entities.Translation
                 var assignments = this.GetColumnAssignments(
                     table,
                     instance,
-                    entity,
-                    m => m.IsUpdatable,
+                    entity.Members,
+                    m => m.Column.IsUpdatable,
                     null,
                     linguist,
                     police
@@ -984,12 +1136,12 @@ namespace IQToolkit.Entities.Translation
 
                 foreach (var table in this.GetDependencyOrderedTables(entity))
                 {
-                    TableExpression tex = new TableExpression(new TableAlias(), entity, table.TableName);
+                    TableExpression tex = new TableExpression(new TableAlias(), entity, table.Name);
                     var assignments = this.GetColumnAssignments(
                         tex,
                         instance,
-                        entity,
-                        m => m.IsUpdatable,
+                        entity.Members,
+                        m => m.Column.IsUpdatable,
                         null,
                         linguist,
                         police
@@ -1040,22 +1192,28 @@ namespace IQToolkit.Entities.Translation
             LanguageTranslator linguist,
             PolicyTranslator police)
         {
-            if (table is MappedExtensionTable exTable)
+            if (table is ExtensionTable exTable)
             {
-                var keyColNames = exTable.KeyColumnNames;
-                var relatedMembers = exTable.RelatedMembers;
+                var keyColumns = exTable.KeyColumns;
+                var relatedKeyColumns = exTable.RelatedKeyColumns;
 
                 Expression? where = null;
-                for (int i = 0, n = keyColNames.Count; i < n; i++)
+                for (int i = 0, n = keyColumns.Count; i < n; i++)
                 {
-                    var relatedMember = relatedMembers[i];
+                    var keyColumn = keyColumns[i];
+                    var relatedKeyColumn = relatedKeyColumns[i];
+
+                    var relatedMemberType = GetMemberType(relatedKeyColumn);
+                    var relatedColumnType = GetColumnType(relatedKeyColumn, linguist.Language);
+
                     var cex = new ColumnExpression(
-                        TypeHelper.GetMemberType(relatedMember.Member), 
-                        this.GetColumnType(relatedMember, linguist.Language), 
+                        relatedMemberType, 
+                        relatedColumnType, 
                         root.Alias, 
-                        keyColNames[n]
+                        keyColumn.Name
                         );
-                    var nex = this.GetMemberExpression(instance, relatedMember, linguist, police);
+
+                    var nex = this.GetMemberExpression(instance, relatedKeyColumn.Member!, linguist, police);
                     var eq = cex.Equal(nex);
                     where = (where != null) 
                         ? where.And(eq) 
@@ -1082,7 +1240,7 @@ namespace IQToolkit.Entities.Translation
         {
             if (entity.ExtensionTables.Count == 0)
             {
-                var table = new TableExpression(new TableAlias(), entity, entity.PrimaryTable.TableName);
+                var table = new TableExpression(new TableAlias(), entity, entity.PrimaryTable.Name);
                 Expression? where = null;
 
                 if (instance != null)
@@ -1107,7 +1265,7 @@ namespace IQToolkit.Entities.Translation
 
                     foreach (var table in this.GetDependencyOrderedTables(entity).Reverse())
                     {
-                        var tex = new TableExpression(new TableAlias(), entity, table.TableName);
+                        var tex = new TableExpression(new TableAlias(), entity, table.Name);
                         var where = this.GetIdentityCheck(tex, entity, instance, linguist, police);
                         commands.Add(new DeleteCommand(tex, where));
                     }
@@ -1128,7 +1286,7 @@ namespace IQToolkit.Entities.Translation
 
                     foreach (var table in this.GetDependencyOrderedTables(entity).Reverse())
                     {
-                        var tex = new TableExpression(new TableAlias(), entity, table.TableName);
+                        var tex = new TableExpression(new TableAlias(), entity, table.Name);
                         var where = deleteCheck != null
                             ? this.GetEntityStateTest(entity, null, deleteCheck, linguist, police)
                             : null;

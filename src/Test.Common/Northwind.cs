@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 #nullable disable
 namespace Test
@@ -47,13 +46,13 @@ namespace Test
 
     public class Product : IEntity
     {
-        public int ID;
+        public int ProductID;
         public string ProductName;
         public bool Discontinued;
 
         int IEntity.ID
         {
-            get { return this.ID; }
+            get { return this.ProductID; }
         }
     }
 
@@ -68,10 +67,10 @@ namespace Test
 
     public class Address
     {
-        public string Street { get; private set; }
-        public string City { get; private set; }
-        public string Region { get; private set; }
-        public string PostalCode { get; private set; }
+        public string Street { get; }
+        public string City { get; }
+        public string Region { get;  }
+        public string PostalCode { get; }
 
         public Address(string street, string city, string region, string postalCode)
         {
@@ -84,42 +83,27 @@ namespace Test
 
     public class Northwind
     {
-        private readonly IEntityProvider provider;
+        public IEntityProvider Provider { get; }
 
         public Northwind(IEntityProvider provider)
         {
-            this.provider = provider;
+            this.Provider = provider;
         }
 
-        public IEntityProvider Provider
-        {
-            get { return this.provider; }
-        }
+        public virtual IEntityTable<Customer> Customers =>
+            this.Provider.GetTable<Customer>(nameof(Customers));
 
-        public virtual IEntityTable<Customer> Customers
-        {
-            get { return this.provider.GetTable<Customer>(); }
-        }
+        public virtual IEntityTable<Order> Orders =>
+            this.Provider.GetTable<Order>(nameof(Orders));
 
-        public virtual IEntityTable<Order> Orders
-        {
-            get { return this.provider.GetTable<Order>(); }
-        }
+        public virtual IEntityTable<OrderDetail> OrderDetails =>
+            this.Provider.GetTable<OrderDetail>(nameof(OrderDetails));
 
-        public virtual IEntityTable<OrderDetail> OrderDetails
-        {
-            get { return this.provider.GetTable<OrderDetail>(); }
-        }
+        public virtual IEntityTable<Product> Products =>
+            this.Provider.GetTable<Product>(nameof(Products));
 
-        public virtual IEntityTable<Product> Products
-        {
-            get { return this.provider.GetTable<Product>(); }
-        }
-
-        public virtual IEntityTable<Employee> Employees
-        {
-            get { return this.provider.GetTable<Employee>(); }
-        }
+        public virtual IEntityTable<Employee> Employees =>
+            this.Provider.GetTable<Employee>(nameof(Employees));
     }
 
     public class NorthwindWithAttributes : Northwind
@@ -128,7 +112,7 @@ namespace Test
             : base(provider)
         {
         }
-
+        [Entity(Id = "Customers")]
         [Table]
         [Column(Member = nameof(Customer.CustomerID), IsPrimaryKey = true)]
         [Column(Member = nameof(Customer.ContactName))]
@@ -136,41 +120,33 @@ namespace Test
         [Column(Member = nameof(Customer.Phone))]
         [Column(Member = nameof(Customer.City), DbType="NVARCHAR(20)")]
         [Column(Member = nameof(Customer.Country))]
-        [Association(Member = nameof(Customer.Orders), KeyMembers = nameof(Customer.CustomerID), RelatedKeyMembers = nameof(Order.CustomerID))]
-        public override IEntityTable<Customer> Customers
-        {
-            get { return base.Customers; }
-        }
+        [Association(Member = nameof(Customer.Orders), KeyColumns = "CustomerID")]
+        public override IEntityTable<Customer> Customers =>
+            base.Customers;
         
         [Table]
         [Column(Member = nameof(Order.OrderID), IsPrimaryKey = true, IsGenerated = true)]
         [Column(Member = nameof(Order.CustomerID))]
         [Column(Member = nameof(Order.OrderDate))]
-        [Association(Member = nameof(Order.Customer), KeyMembers = nameof(Order.CustomerID), RelatedKeyMembers = nameof(Customer.CustomerID))]
-        [Association(Member = nameof(Order.Details), KeyMembers = nameof(Order.OrderID), RelatedKeyMembers = nameof(OrderDetail.OrderID))]
-        public override IEntityTable<Order> Orders
-        {
-            get { return base.Orders; }
-        }
+        [Association(Member = nameof(Order.Customer), KeyColumns="CustomerID", IsForeignKey=true)]
+        [Association(Member = nameof(Order.Details), KeyColumns="OrderID")]
+        public override IEntityTable<Order> Orders =>
+            base.Orders;
 
         [Table(Name = "Order Details")]
         [Column(Member = nameof(OrderDetail.OrderID), IsPrimaryKey = true)]
         [Column(Member = nameof(OrderDetail.ProductID), IsPrimaryKey = true)]
-        [Association(Member = nameof(OrderDetail.Product), KeyMembers = nameof(OrderDetail.ProductID), RelatedKeyMembers = nameof(Product.ID))]
-        [Association(Member = nameof(OrderDetail.Order), KeyMembers =nameof(OrderDetail.OrderID), RelatedKeyMembers = nameof(Order.OrderID))]
-        public override IEntityTable<OrderDetail> OrderDetails
-        {
-            get { return base.OrderDetails; }
-        }
+        [Association(Member = nameof(OrderDetail.Product), KeyColumns="ProductID", RelatedEntityId="Products", IsForeignKey=true)]
+        [Association(Member = nameof(OrderDetail.Order), KeyColumns="OrderID", IsForeignKey=true)]
+        public override IEntityTable<OrderDetail> OrderDetails =>
+            base.OrderDetails;
 
         [Table]
-        [Column(Member = nameof(Product.ID), Name="ProductId", IsPrimaryKey = true)]
+        [Column(Member = nameof(Product.ProductID), IsPrimaryKey = true)]
         [Column(Member = nameof(Product.ProductName))]
         [Column(Member = nameof(Product.Discontinued))]
-        public override IEntityTable<Product> Products
-        {
-            get { return base.Products; }
-        }
+        public override IEntityTable<Product> Products =>
+            base.Products;
 
         [Table]
         [Column(Member = nameof(Employee.EmployeeID), IsPrimaryKey = true)]
@@ -181,10 +157,8 @@ namespace Test
         [Column(Member = "Address.City")]
         [Column(Member = "Address.Region")]
         [Column(Member = "Address.PostalCode")]
-        public override IEntityTable<Employee> Employees
-        {
-            get { return base.Employees; }
-        }
+        public override IEntityTable<Employee> Employees =>
+            base.Employees;
     }
 
     public interface INorthwindSession
@@ -197,7 +171,7 @@ namespace Test
 
     public class NorthwindSession : INorthwindSession
     {
-        IEntitySession session;
+        public IEntitySession Session { get; }
 
         public NorthwindSession(EntityProvider provider)
             : this(new EntitySession(provider))
@@ -206,33 +180,22 @@ namespace Test
 
         public NorthwindSession(IEntitySession session)
         {
-            this.session = session;
-        }
-
-        public IEntitySession Session
-        {
-            get { return this.session; }
+            this.Session = session;
         }
 
         public void SubmitChanges()
         {
-            this.session.SubmitChanges();
+            this.Session.SubmitChanges();
         }
 
-        public ISessionTable<Customer> Customers
-        {
-            get { return this.session.GetTable<Customer>(); }
-        }
+        public ISessionTable<Customer> Customers => 
+            this.Session.GetTable<Customer>(nameof(Customers));
 
-        public ISessionTable<Order> Orders
-        {
-            get { return this.session.GetTable<Order>(); }
-        }
+        public ISessionTable<Order> Orders =>
+            this.Session.GetTable<Order>(nameof(Orders));
 
-        public ISessionTable<OrderDetail> OrderDetails
-        {
-            get { return this.session.GetTable<OrderDetail>(); }
-        }
+        public ISessionTable<OrderDetail> OrderDetails =>
+            this.Session.GetTable<OrderDetail>(nameof(OrderDetails));
     }
 
     public class CustomerX
@@ -289,20 +252,16 @@ namespace Test
         [Column(Member = nameof(CustomerX.Phone))]
         [Column(Member = nameof(CustomerX.City), DbType = "NVARCHAR(20)")]
         [Column(Member = nameof(CustomerX.Country))]
-        [Association(Member = nameof(CustomerX.Orders), KeyMembers = nameof(CustomerX.CustomerID), RelatedKeyMembers = nameof(OrderX.CustomerID))]
-        public IEntityTable<CustomerX> Customers
-        {
-            get { return _provider.GetTable<CustomerX>(); }
-        }
+        [Association(Member = nameof(CustomerX.Orders), KeyColumns = "CustomerID")]
+        public IEntityTable<CustomerX> Customers =>
+            _provider.GetTable<CustomerX>();
 
         [Table]
         [Column(Member = nameof(OrderX.OrderID), IsPrimaryKey = true, IsGenerated = true)]
         [Column(Member = nameof(OrderX.CustomerID))]
         [Column(Member = nameof(OrderX.OrderDate))]
-        [Association(Member = nameof(OrderX.Customer), KeyMembers = nameof(OrderX.CustomerID), RelatedKeyMembers = nameof(CustomerX.CustomerID))]
-        public IEntityTable<OrderX> Orders
-        {
-            get { return _provider.GetTable<OrderX>(); }
-        }
+        [Association(Member = nameof(OrderX.Customer), KeyColumns = "CustomerID")]
+        public IEntityTable<OrderX> Orders =>
+            _provider.GetTable<OrderX>();
     }
 }

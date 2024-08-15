@@ -32,9 +32,12 @@ namespace IQToolkit
     {
         public static object Insert(IUpdatable collection, object instance, LambdaExpression resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Insert), 
-                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression) }
+                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
                 );
 
             var callMyself = Expression.Call(
@@ -61,10 +64,13 @@ namespace IQToolkit
         /// <returns>The value of the result if the insert succeed, otherwise null.</returns>
         public static S Insert<T, S>(this IUpdatable<T> collection, T instance, Expression<Func<T, S>>? resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Insert), 
                 new[] { typeof(T), typeof(S) }, 
-                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, S>>) });
+                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, S>>) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod);
 
             var callMyself = Expression.Call(
                 null,
@@ -100,9 +106,13 @@ namespace IQToolkit
         /// <returns>The value of the result function if the update succeeds, otherwise null.</returns>
         public static object Update(IUpdatable collection, object instance, LambdaExpression updateCheck, LambdaExpression resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Update),
-                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression), typeof(LambdaExpression) });
+                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression), typeof(LambdaExpression) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -133,10 +143,14 @@ namespace IQToolkit
         /// <returns>The value of the result function if the update succeeds, otherwise null.</returns>
         public static S Update<T, S>(this IUpdatable<T> collection, T instance, Expression<Func<T, bool>>? updateCheck, Expression<Func<T, S>>? resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
-                nameof(Update), 
-                new[] { typeof(T), typeof(S) }, 
-                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>), typeof(Expression<Func<T, S>>) });
+            typeof(Updatable).TryGetDeclaredMethod(
+                nameof(Update),
+                new[] { typeof(T), typeof(S) },
+                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>), typeof(Expression<Func<T, S>>) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -186,9 +200,13 @@ namespace IQToolkit
         /// <returns>The value of the result if the insert or update succeeds, otherwise null.</returns>
         public static object InsertOrUpdate(IUpdatable collection, object instance, LambdaExpression updateCheck, LambdaExpression resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
-                nameof(InsertOrUpdate), 
-                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression), typeof(LambdaExpression) });
+            typeof(Updatable).TryGetDeclaredMethod(
+                nameof(InsertOrUpdate),
+                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression), typeof(LambdaExpression) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -219,10 +237,14 @@ namespace IQToolkit
         /// <returns>The value of the result if the insert or update succeeds, otherwise null.</returns>
         public static S InsertOrUpdate<T, S>(this IUpdatable<T> collection, T instance, Expression<Func<T, bool>>? updateCheck, Expression<Func<T, S>>? resultSelector)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
-                nameof(InsertOrUpdate), 
-                new[] { typeof(T), typeof(S) }, 
-                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>), typeof(Expression<Func<T, S>>) });
+            typeof(Updatable).TryGetDeclaredMethod(
+                nameof(InsertOrUpdate),
+                new[] { typeof(T), typeof(S) },
+                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>), typeof(Expression<Func<T, S>>) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -270,9 +292,13 @@ namespace IQToolkit
         /// <returns>The value 1 if the delete succeeds, otherwise 0.</returns>
         public static object Delete(IUpdatable collection, object instance, LambdaExpression? deleteCheck)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Delete),
-                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression) });
+                new[] { typeof(IUpdatable), typeof(object), typeof(LambdaExpression) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -297,10 +323,14 @@ namespace IQToolkit
         /// <returns>The value 1 if the delete succeeds, otherwise 0.</returns>
         public static int Delete<T>(this IUpdatable<T> collection, T instance, Expression<Func<T, bool>>? deleteCheck)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Delete),
                 new[] { typeof(T) },
-                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>) });
+                new[] { typeof(IUpdatable<T>), typeof(T), typeof(Expression<Func<T, bool>>) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -333,9 +363,13 @@ namespace IQToolkit
         /// <returns>The number of objects deleted.</returns>
         public static int Delete(IUpdatable collection, LambdaExpression predicate)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Delete),
-                new[] { typeof(IUpdatable), typeof(LambdaExpression) });
+                new[] { typeof(IUpdatable), typeof(LambdaExpression) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -356,10 +390,14 @@ namespace IQToolkit
         /// <returns>The number of objects deleted.</returns>
         public static int Delete<T>(this IUpdatable<T> collection, Expression<Func<T, bool>> predicate)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Delete),
                 new[] { typeof(T) },
-                new[] { typeof(IUpdatable<T>), typeof(Expression<Func<T, bool>>) });
+                new[] { typeof(IUpdatable<T>), typeof(Expression<Func<T, bool>>) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -384,9 +422,13 @@ namespace IQToolkit
         /// <returns>A sequence of results cooresponding to each invocation.</returns>
         public static IEnumerable Batch(IUpdatable collection, IEnumerable instances, LambdaExpression fnOperation, int batchSize, bool stream)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Batch),
-                new[] { typeof(IUpdatable), typeof(IEnumerable), typeof(LambdaExpression), typeof(int), typeof(bool) });
+                new[] { typeof(IUpdatable), typeof(IEnumerable), typeof(LambdaExpression), typeof(int), typeof(bool) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,
@@ -417,10 +459,14 @@ namespace IQToolkit
         /// <returns>A sequence of results cooresponding to each invocation.</returns>
         public static IEnumerable<S> Batch<U,T,S>(this IUpdatable<U> collection, IEnumerable<T> instances, Expression<Func<IUpdatable<U>, T, S>> fnOperation, int batchSize, bool stream)
         {
-            var thisMethod = TypeHelper.FindDeclaredMethod(typeof(Updatable),
+            typeof(Updatable).TryGetDeclaredMethod(
                 nameof(Batch),
                 new[] { typeof(U), typeof(T), typeof(S) },
-                new[] { typeof(IUpdatable<U>), typeof(IEnumerable<T>), typeof(Expression<Func<IUpdatable<U>, T, S>>), typeof(int), typeof(bool) });
+                new[] { typeof(IUpdatable<U>), typeof(IEnumerable<T>), typeof(Expression<Func<IUpdatable<U>, T, S>>), typeof(int), typeof(bool) },
+                fnMatch: null,
+                includeNonPublic: false,
+                out var thisMethod
+                );
 
             var callMyself = Expression.Call(
                 null,

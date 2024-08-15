@@ -9,9 +9,9 @@ using System.Reflection;
 
 namespace Test
 {
-    public class TestBase
+    public static class TestHelpers
     {
-        protected static void TestQueryText<TValue>(
+        public static void TestQueryText<TValue>(
             IQueryable<TValue> query,
             params string[] expectedQueries)
         {
@@ -31,7 +31,7 @@ namespace Test
             }
         }
 
-        protected static void TestQueryResults<TValue>(
+        public static void TestQueryResults<TValue>(
             IQueryable<TValue> query,
             IEnumerable<TValue> expectedValues)
         {
@@ -40,16 +40,8 @@ namespace Test
             AssertAreEquivalent(expectedValues, actualValues);
         }
 
-        private void TestQueryResults<T>(
-            string resultXmlText,
-            Func<NorthwindWithAttributes, IQueryable<T>> fnQuery,
-            IEnumerable<T> expectedValues
-            )
-        {
-        }
-
         private static char[] _lineEndings = new[] { '\r', '\n' };
-        private static string Normalize(string text)
+        public static string Normalize(string text)
         {
             var parts = text.Split(_lineEndings, StringSplitOptions.RemoveEmptyEntries)
                 .Select(text => text.Trim())
@@ -126,5 +118,36 @@ namespace Test
             }
         }
 
+        public static void AssertLargeTextEqual(string text1, string text2)
+        {
+            if (text1 != text2)
+            {
+                var lines1 = SplitLines(text1);
+                var lines2 = SplitLines(text2);
+
+                for (int i = 0; i < lines1.Length; i++)
+                {
+                    if (lines1[i] != lines2[i])
+                    {
+                        Assert.Fail($"Line {i + 1}:\nexpected: {lines1[i]}\nactual: {lines2[i]}");
+                    }
+                }
+            }
+        }
+
+        public static string[] SplitLines(string text)
+        {
+            return text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .ToArray();
+        }
+
+        public static string[] SplitNames(string text)
+        {
+            return text.Split(new char[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(t => t.Trim())
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToArray();
+        }
     }
 }

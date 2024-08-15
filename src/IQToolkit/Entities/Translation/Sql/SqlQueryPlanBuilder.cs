@@ -160,8 +160,7 @@ namespace IQToolkit.Entities.Translation
                 }
                 else
                 {
-                    var constructor = TypeHelper.FindDeclaredConstructor(typeof(CompoundKey), new[] { typeof(object[]) });
-
+                    typeof(CompoundKey).TryGetDeclaredConstructor(new[] { typeof(object[]) }, out var constructor);
                     return Expression.New(
                         constructor,
                         Expression.NewArrayInit(typeof(object), key.Select(k => (Expression)Expression.Convert(k, typeof(object))))
@@ -174,22 +173,26 @@ namespace IQToolkit.Entities.Translation
                 // convert client join into a up-front lookup table builder & replace client-join in tree with lookup accessor
 
                 // 1) lookup = query.Select(e => new KVP(key: inner, value: e)).ToLookup(kvp => kvp.Key, kvp => kvp.Value)
-                Expression innerKey = MakeJoinKey(join.InnerKey);
-                Expression outerKey = MakeJoinKey(join.OuterKey);
+                var innerKey = MakeJoinKey(join.InnerKey);
+                var outerKey = MakeJoinKey(join.OuterKey);
 
-                var kvpConstructor = TypeHelper.FindDeclaredConstructor(typeof(KeyValuePair<,>).MakeGenericType(innerKey.Type, join.Projection.Projector.Type), new Type[] { innerKey.Type, join.Projection.Projector.Type });
-                Expression constructKVPair = Expression.New(kvpConstructor, innerKey, join.Projection.Projector);
-                ClientProjectionExpression newProjection = new ClientProjectionExpression(join.Projection.Select, constructKVPair);
+                typeof(KeyValuePair<,>).MakeGenericType(innerKey.Type, join.Projection.Projector.Type)
+                    .TryGetDeclaredConstructor(
+                        new Type[] { innerKey.Type, join.Projection.Projector.Type },
+                        out var kvpConstructor
+                      );
+                var constructKVPair = Expression.New(kvpConstructor, innerKey, join.Projection.Projector);
+                var newProjection = new ClientProjectionExpression(join.Projection.Select, constructKVPair);
 
                 int iLookup = ++nLookup;
                 var execution = this.GetProjectionExecutor(newProjection, false);
 
-                ParameterExpression kvp = Expression.Parameter(constructKVPair.Type, "kvp");
+                var kvp = Expression.Parameter(constructKVPair.Type, "kvp");
 
                 // filter out nulls
                 if (join.Projection.Projector is OuterJoinedExpression)
                 {
-                    LambdaExpression pred = Expression.Lambda(
+                    var pred = Expression.Lambda(
                         Expression.PropertyOrField(kvp, "Value").NotEqual(TypeHelper.GetNullConstant(join.Projection.Projector.Type)),
                         kvp
                         );
@@ -203,7 +206,7 @@ namespace IQToolkit.Entities.Translation
 
                 // 2) agg(lookup[outer])
                 var lookup = Expression.Parameter(toLookup.Type, "lookup" + iLookup);
-                var indexer = lookup.Type.FindDeclaredIndexer("Item");
+                lookup.Type.TryGetDeclaredIndexer("Item", out var indexer);
                 Expression access = Expression.Call(lookup, indexer!.GetMethod, this.Visit(outerKey));
 
                 if (join.Projection.Aggregator != null)

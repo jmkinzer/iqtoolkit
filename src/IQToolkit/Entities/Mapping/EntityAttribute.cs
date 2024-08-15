@@ -21,6 +21,6 @@ namespace IQToolkit.Entities.Mapping
         /// The type that is constructed when the entity is returned as the result of a query.
         /// If not specified it is the same as the entity type, the type the attribute is placed on.
         /// </summary>
-        public Type? RuntimeType { get; set; }
+        public Type? ConstructedType { get; set; }
     }
 }

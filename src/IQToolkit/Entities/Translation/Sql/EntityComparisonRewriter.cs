@@ -181,7 +181,7 @@ namespace IQToolkit.Entities.Translation
         {
             if (member is MethodInfo 
                 && member.Name.StartsWith("get_")
-                && member.DeclaringType.FindDeclaredProperty(member.Name.Substring(4)) is { } prop)
+                && member.DeclaringType.TryGetDeclaredProperty(member.Name.Substring(4), out var prop))
             {
                 return prop;
             }
